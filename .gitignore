@@ -5,3 +5,11 @@ dist/
 !.env.example
 *.log
 .DS_Store
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.dump
+*.sql.gz
+*.tar.gz
