@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://miszczuk.it/contracts/mvp-app-flow-state/1.0",
+  "title": "MVP App Flow State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "correlationId",
+    "step",
+    "formData"
+  ],
+  "properties": {
+    "contractVersion": {
+      "const": "1.0"
+    },
+    "correlationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "step": {
+      "type": "string",
+      "enum": [
+        "IDLE",
+        "VALIDATING",
+        "CREATING_PROJECT",
+        "CREATING_SESSION",
+        "STARTING_SESSION",
+        "CREATING_TASK",
+        "MARKING_TASK_READY",
+        "READY_FOR_EXECUTION",
+        "FAILED"
+      ]
+    },
+    "projectId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "taskId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "projectRevision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "sessionRevision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "taskRevision": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "lastCompletedStep": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "errorCode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "formData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectName",
+        "goal",
+        "taskDescription"
+      ],
+      "properties": {
+        "projectName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 5000
+        },
+        "taskDescription": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        }
+      }
+    }
+  }
+}
