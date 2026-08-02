@@ -7,6 +7,12 @@ ze stroną informacyjną `miszczuk.it`.
 
 - `VITE_PLATFORM_API_URL` — publiczny prefiks Platform API, domyślnie `/api`;
 - `VITE_PLATFORM_API_ENABLED` — aktywuje rzeczywiste wywołania formularza.
+- `VITE_APP_ENV` — jawne oznaczenie środowiska, na przykład `DEV`.
+
+Obraz wdrożeniowy buduje `apps/app/Dockerfile`. Konfiguracja DEV ustawia API na
+`/api`, włącza wywołania Platform API i wyświetla etykietę „Środowisko DEV”.
+Kontener słucha wyłącznie w sieci Docker na porcie 8080; nie publikuje portu
+hosta.
 
 Plik `.env.example` pozostawia API wyłączone (`false`). Lokalne DEV i testy
 integracyjne mogą jawnie ustawić `true`. Zmienne Vite są publiczną konfiguracją
