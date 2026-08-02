@@ -1,5 +1,5 @@
 import { PlatformApiError } from './safe-error.js'
-import type { ProjectResponse, SessionResponse, TaskResponse } from '../types.js'
+import type { ExecutionResponse, ProjectResponse, SessionResponse, TaskResponse } from '../types.js'
 
 type FetchLike = typeof fetch
 
@@ -9,6 +9,8 @@ export type PlatformApiClient = {
   startSession(sessionId: string, expectedRevision: number, correlationId: string): Promise<SessionResponse>
   createTask(sessionId: string, title: string, description: string, correlationId: string): Promise<TaskResponse>
   markTaskReady(taskId: string, expectedRevision: number, correlationId: string): Promise<TaskResponse>
+  startExecution(taskId: string, expectedTaskRevision: number, idempotencyKey: string, correlationId: string): Promise<ExecutionResponse>
+  getExecution(executionId: string, correlationId: string): Promise<ExecutionResponse>
 }
 
 type ClientOptions = { fetchImpl?: FetchLike; timeoutMs?: number; createId?: () => string }
@@ -25,7 +27,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function assertResponse(value: unknown, kind: 'project' | 'session' | 'task') {
+function assertResponse(value: unknown, kind: 'project' | 'session' | 'task' | 'execution') {
   if (!isRecord(value) || value.contractVersion !== '1.0' || !Number.isInteger(value.revision)) {
     throw new PlatformApiError('INVALID_RESPONSE')
   }
@@ -41,14 +43,14 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
   const timeoutMs = options.timeoutMs ?? 10_000
   const createId = options.createId ?? (() => crypto.randomUUID())
 
-  async function post<T>(path: string, body: object, correlationId: string, kind: 'project' | 'session' | 'task'): Promise<T> {
+  async function call<T>(method: 'GET' | 'POST', path: string, body: object | null, correlationId: string, kind: 'project' | 'session' | 'task' | 'execution'): Promise<T> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetchImpl(`${normalizedBaseUrl}${path}`, {
-        method: 'POST', signal: controller.signal,
+        method, signal: controller.signal,
         headers: { 'content-type': 'application/json', 'x-correlation-id': correlationId, 'x-request-id': createId() },
-        body: JSON.stringify(body),
+        ...(body ? { body: JSON.stringify(body) } : {}),
       })
       if (!response.ok) {
         let errorCode = response.status === 409 ? 'CONFLICT' : `HTTP_${response.status}`
@@ -71,10 +73,14 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
   }
 
   return {
-    createProject: (name, description, correlationId) => post('/projects', { contractVersion: '1.0', name, description }, correlationId, 'project'),
-    createSession: (projectId, correlationId) => post(`/projects/${projectId}/sessions`, { contractVersion: '1.0' }, correlationId, 'session'),
-    startSession: (sessionId, expectedRevision, correlationId) => post(`/sessions/${sessionId}/start`, { contractVersion: '1.0', expectedRevision }, correlationId, 'session'),
-    createTask: (sessionId, title, description, correlationId) => post(`/sessions/${sessionId}/tasks`, { contractVersion: '1.0', taskType: 'BUSINESS_ANALYSIS', title, description }, correlationId, 'task'),
-    markTaskReady: (taskId, expectedRevision, correlationId) => post(`/tasks/${taskId}/ready`, { contractVersion: '1.0', expectedRevision }, correlationId, 'task'),
+    createProject: (name, description, correlationId) => call('POST', '/projects', { contractVersion: '1.0', name, description }, correlationId, 'project'),
+    createSession: (projectId, correlationId) => call('POST', `/projects/${projectId}/sessions`, { contractVersion: '1.0' }, correlationId, 'session'),
+    startSession: (sessionId, expectedRevision, correlationId) => call('POST', `/sessions/${sessionId}/start`, { contractVersion: '1.0', expectedRevision }, correlationId, 'session'),
+    createTask: (sessionId, title, description, correlationId) => call('POST', `/sessions/${sessionId}/tasks`, { contractVersion: '1.0', taskType: 'BUSINESS_ANALYSIS', title, description }, correlationId, 'task'),
+    markTaskReady: (taskId, expectedRevision, correlationId) => call('POST', `/tasks/${taskId}/ready`, { contractVersion: '1.0', expectedRevision }, correlationId, 'task'),
+    startExecution: (taskId, expectedTaskRevision, idempotencyKey, correlationId) => call('POST', `/tasks/${taskId}/executions`, {
+      contractVersion: '1.0', idempotencyKey, expectedTaskRevision,
+    }, correlationId, 'execution'),
+    getExecution: (executionId, correlationId) => call('GET', `/executions/${executionId}`, null, correlationId, 'execution'),
   }
 }

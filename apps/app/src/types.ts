@@ -35,3 +35,14 @@ export type MvpFlowState = {
 export type ProjectResponse = { contractVersion: '1.0'; projectId: string; status: 'ACTIVE' | 'ARCHIVED'; revision: number }
 export type SessionResponse = { contractVersion: '1.0'; sessionId: string; projectId: string; status: 'CREATED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'; revision: number }
 export type TaskResponse = { contractVersion: '1.0'; taskId: string; sessionId: string; status: 'CREATED' | 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; revision: number }
+
+export type ExecutionStatus = 'CREATED' | 'BUILDING_CONTEXT' | 'WAITING_FOR_LLM_GATEWAY' | 'RUNNING' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_FINAL' | 'CANCELLED' | 'UNKNOWN'
+export type ExecutionResponse = {
+  contractVersion: '1.0'
+  executionId: string
+  taskId: string
+  correlationId: string
+  idempotencyKey: string
+  status: ExecutionStatus
+  revision: number
+}

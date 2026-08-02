@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { createFlowState, nextIncompleteStep, runMvpFlow } from '../lib/mvp-flow.js'
+import { startAndTrackExecution, type ExecutionTrackingState } from '../lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../lib/platform-api.js'
 import { toSafeUiError, type SafeUiError } from '../lib/safe-error.js'
 import { validateAnalysisForm, type FormErrors } from '../lib/validation.js'
@@ -28,7 +29,10 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, clientOverride, crea
   const [errors, setErrors] = useState<FormErrors>({})
   const [flow, setFlow] = useState<MvpFlowState | null>(null)
   const [safeError, setSafeError] = useState<SafeUiError | null>(null)
+  const [execution, setExecution] = useState<ExecutionTrackingState | null>(null)
   const submitting = useRef(false)
+  const startingExecution = useRef(false)
+  const executionIdempotencyKey = useRef<string | null>(null)
   const projectNameInput = useRef<HTMLInputElement>(null)
   const goalInput = useRef<HTMLTextAreaElement>(null)
   const taskInput = useRef<HTMLTextAreaElement>(null)
@@ -63,6 +67,18 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, clientOverride, crea
     setFlow(result.state)
     if (result.error) setSafeError(toSafeUiError(result.error))
     submitting.current = false
+  }
+
+  async function execute() {
+    if (startingExecution.current || flow?.step !== 'READY_FOR_EXECUTION' || !flow.taskId || flow.taskRevision === null) return
+    startingExecution.current = true; setSafeError(null)
+    executionIdempotencyKey.current ??= crypto.randomUUID()
+    const result = await startAndTrackExecution(client, {
+      taskId: flow.taskId, taskRevision: flow.taskRevision, correlationId: flow.correlationId,
+      idempotencyKey: executionIdempotencyKey.current,
+    }, { onState: setExecution })
+    if (result.error) setSafeError(toSafeUiError(result.error))
+    startingExecution.current = false
   }
 
   return (
@@ -115,6 +131,16 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, clientOverride, crea
           <dt>Task status</dt><dd>{flow.taskId ? (flow.taskRevision === 0 ? 'CREATED' : 'READY') : '—'}</dd>
         </dl> : <p>Nie utworzono jeszcze elementów procesu.</p>}
         {step === 'READY_FOR_EXECUTION' && <p className="success-message">Zadanie jest gotowe do uruchomienia w kolejnym etapie MVP.</p>}
+        {step === 'READY_FOR_EXECUTION' && <button className="primary" type="button" onClick={execute}
+          disabled={!apiEnabled || execution?.status === 'STARTING_EXECUTION' || execution?.status === 'BUILDING_CONTEXT' || execution?.status === 'WAITING_FOR_LLM_GATEWAY'}>
+          Uruchom wykonanie
+        </button>}
+        {execution && <dl className="result-grid">
+          <dt>Execution ID</dt><dd>{execution.executionId ?? 'Tworzenie…'}</dd>
+          <dt>Execution status</dt><dd>{execution.status}</dd>
+        </dl>}
+        {execution?.status === 'BUILDING_CONTEXT' && <p>Trwa przygotowanie kontekstu.</p>}
+        {execution?.status === 'WAITING_FOR_LLM_GATEWAY' && <p className="success-message">Kontekst został przygotowany. Zadanie oczekuje na uruchomienie LLM Gateway.</p>}
         <p>Analiza nie została jeszcze uruchomiona. Funkcje decyzji Human in the Loop będą dostępne po utworzeniu Artifact Version.</p>
       </section>
     </main>

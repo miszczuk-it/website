@@ -46,4 +46,19 @@ Stan końcowy:
 
 `READY_FOR_EXECUTION`
 
-Nie oznacza on uruchomienia Execution ani analizy LLM.
+Po jawnej akcji użytkownika:
+
+```text
+POST /api/tasks/{taskId}/executions
+  |
+  +--> BUILDING_CONTEXT
+  |
+  +--> GET /api/executions/{executionId}
+         WAITING_FOR_LLM_GATEWAY
+```
+
+Start wymaga `idempotencyKey` i `expectedTaskRevision`. Klucz nie zmienia się
+przy ponowieniu po niepewnym wyniku sieciowym, dzięki czemu UI nie tworzy
+drugiego Execution. Polling wykonuje wyłącznie operacje GET.
+
+`WAITING_FOR_LLM_GATEWAY` nie oznacza uruchomienia analizy LLM.
