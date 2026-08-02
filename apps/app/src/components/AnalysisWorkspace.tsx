@@ -20,11 +20,12 @@ const STEP_LABELS: Record<FlowStep, string> = {
 type Props = {
   apiBaseUrl: string
   apiEnabled: boolean
+  appEnvironment?: string
   clientOverride?: PlatformApiClient
   createCorrelationId?: () => string
 }
 
-export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, clientOverride, createCorrelationId = () => crypto.randomUUID() }: Props) {
+export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LOCAL', clientOverride, createCorrelationId = () => crypto.randomUUID() }: Props) {
   const [values, setValues] = useState(EMPTY_FORM)
   const [errors, setErrors] = useState<FormErrors>({})
   const [flow, setFlow] = useState<MvpFlowState | null>(null)
@@ -85,6 +86,7 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, clientOverride, crea
     <main className="app-shell">
       <header className="hero">
         <p className="eyebrow">AI Platform · app.miszczuk.it</p>
+        {appEnvironment === 'DEV' && <p className="environment-badge" role="status">Środowisko DEV</p>}
         <h1>Przygotuj analizę projektu</h1>
         <p>Utwórz Project, Session i zadanie Business Analyst. Analiza zostanie uruchomiona dopiero w kolejnym etapie MVP.</p>
       </header>

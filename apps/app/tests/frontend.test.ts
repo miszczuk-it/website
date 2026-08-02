@@ -37,6 +37,13 @@ test('component renders accessible fields and keeps Human in the Loop decisions 
   assert.match(html, /disabled=""/)
 })
 
+test('DEV deployment is explicitly labelled', () => {
+  const html = renderToStaticMarkup(createElement(AnalysisWorkspace, {
+    apiBaseUrl: '/api', apiEnabled: true, appEnvironment: 'DEV',
+  }))
+  assert.ok(html.includes('Środowisko DEV'))
+})
+
 test('validates required fields and length limits', () => {
   assert.deepEqual(validateAnalysisForm({ projectName: '', goal: ' ', taskDescription: '' }), {
     projectName: 'Podaj nazwę projektu.', goal: 'Opisz cel lub problem.', taskDescription: 'Opisz zadanie dla Business Analyst.',
