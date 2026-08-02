@@ -20,3 +20,5 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - run: npm run test:app
+      - run: npm run build:app

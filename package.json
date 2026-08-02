@@ -3,10 +3,16 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "workspaces": [
+    "apps/app"
+  ],
   "scripts": {
     "dev": "vite",
+    "dev:app": "npm run dev --workspace @miszczuk-it/app",
     "build": "tsc -b && vite build",
+    "build:app": "npm run build --workspace @miszczuk-it/app",
     "lint": "eslint .",
+    "test:app": "npm run test --workspace @miszczuk-it/app",
     "preview": "vite preview"
   },
   "dependencies": {
