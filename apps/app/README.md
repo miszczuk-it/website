@@ -32,8 +32,14 @@ nieukończony krok i identyfikator zgłoszenia. Jawne ponowienie zaczyna się od
 pierwszego nieukończonego kroku; nie tworzy ponownie Project ani innych już
 zapisanych obiektów.
 
-Końcowy stan `READY_FOR_EXECUTION` oznacza wyłącznie gotowość Task. Execution,
-LLM, Artifact Version i decyzje Human in the Loop nie są jeszcze dostępne.
+Stan `READY_FOR_EXECUTION` udostępnia jawny przycisk uruchomienia. Frontend
+wysyła `POST /api/tasks/{taskId}/executions` z zapamiętanym kluczem idempotencji
+i rewizją Task, zapisuje `executionId`, a następnie wyłącznie odczytowo odpytuje
+`GET /api/executions/{executionId}`.
+
+UI prezentuje `BUILDING_CONTEXT` i `WAITING_FOR_LLM_GATEWAY`. Ten ostatni stan
+oznacza przygotowany kontekst, ale nie oznacza wywołania LLM. Artifact Version i
+decyzje Human in the Loop nie są jeszcze dostępne.
 
 ## Walidacja
 

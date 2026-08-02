@@ -5,6 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AnalysisWorkspace } from '../src/components/AnalysisWorkspace.js'
 import { createFlowState, runMvpFlow } from '../src/lib/mvp-flow.js'
+import { startAndTrackExecution } from '../src/lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../src/lib/platform-api.js'
 import { PlatformApiError, toSafeUiError } from '../src/lib/safe-error.js'
 import { validateAnalysisForm } from '../src/lib/validation.js'
@@ -13,6 +14,7 @@ const FORM = { projectName: 'MVP', goal: 'Zweryfikuj problem', taskDescription: 
 const PROJECT_ID = '00000000-0000-4000-8000-000000000001'
 const SESSION_ID = '00000000-0000-4000-8000-000000000002'
 const TASK_ID = '00000000-0000-4000-8000-000000000003'
+const EXECUTION_ID = '00000000-0000-4000-8000-000000000004'
 
 function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformApiClient {
   return {
@@ -21,6 +23,8 @@ function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformA
     startSession: async () => ({ contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, status: 'ACTIVE', revision: 1 }),
     createTask: async () => ({ contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, status: 'CREATED', revision: 0 }),
     markTaskReady: async () => ({ contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, status: 'READY', revision: 1 }),
+    startExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }),
+    getExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }),
     ...overrides,
   }
 }
@@ -140,4 +144,47 @@ test('client maps timeout and network failure without leaking details', async ()
   await assert.rejects(network.createProject('x', 'y', 'correlation-network'), (error: PlatformApiError) => error.code === 'NETWORK_ERROR')
   const safe = toSafeUiError(new PlatformApiError('NETWORK_ERROR', 'correlation-network'))
   assert.equal(JSON.stringify(safe).includes('secret host detail'), false)
+})
+
+test('Execution client uses canonical endpoints and required start contract', async () => {
+  const calls: Array<{ method: string; url: string; body?: Record<string, unknown>; correlationId: string | null }> = []
+  const fetchImpl: typeof fetch = async (input, init) => {
+    calls.push({ method: String(init?.method), url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      correlationId: new Headers(init?.headers).get('x-correlation-id') })
+    return new Response(JSON.stringify({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID,
+      correlationId: 'correlation-execution', idempotencyKey: 'idem-1', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }), { status: 200 })
+  }
+  const client = createPlatformApiClient('/api', { fetchImpl })
+  await client.startExecution(TASK_ID, 1, 'idem-1', 'correlation-execution')
+  await client.getExecution(EXECUTION_ID, 'correlation-execution')
+  assert.deepEqual(calls.map(({ method, url }) => ({ method, url })), [
+    { method: 'POST', url: `/api/tasks/${TASK_ID}/executions` }, { method: 'GET', url: `/api/executions/${EXECUTION_ID}` },
+  ])
+  assert.deepEqual(calls[0].body, { contractVersion: '1.0', idempotencyKey: 'idem-1', expectedTaskRevision: 1 })
+  assert.ok(calls.every((call) => call.correlationId === 'correlation-execution'))
+})
+
+test('Execution tracking presents BUILDING_CONTEXT and polls to WAITING_FOR_LLM_GATEWAY without duplicate start', async () => {
+  let starts = 0; let reads = 0; const statuses: string[] = []
+  const client = successfulClient({
+    startExecution: async () => { starts += 1; return { contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID,
+      correlationId: 'correlation', idempotencyKey: 'idem-2', status: 'BUILDING_CONTEXT', revision: 1 } },
+    getExecution: async () => { reads += 1; return { contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID,
+      correlationId: 'correlation', idempotencyKey: 'idem-2', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 } },
+  })
+  const result = await startAndTrackExecution(client, { taskId: TASK_ID, taskRevision: 1, correlationId: 'correlation', idempotencyKey: 'idem-2' },
+    { intervalMs: 0, wait: async () => {}, onState: (state) => statuses.push(state.status) })
+  assert.deepEqual(statuses, ['STARTING_EXECUTION', 'BUILDING_CONTEXT', 'WAITING_FOR_LLM_GATEWAY'])
+  assert.equal(result.status, 'WAITING_FOR_LLM_GATEWAY'); assert.equal(starts, 1); assert.equal(reads, 1)
+})
+
+test('Execution tracking stops safely on partial failure and retains executionId', async () => {
+  const client = successfulClient({
+    startExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID,
+      correlationId: 'correlation', idempotencyKey: 'idem-3', status: 'BUILDING_CONTEXT', revision: 1 }),
+    getExecution: async () => { throw new PlatformApiError('SERVICE_UNAVAILABLE', 'correlation', 503) },
+  })
+  const result = await startAndTrackExecution(client, { taskId: TASK_ID, taskRevision: 1, correlationId: 'correlation', idempotencyKey: 'idem-3' },
+    { intervalMs: 0, wait: async () => {} })
+  assert.equal(result.status, 'FAILED'); assert.equal(result.executionId, EXECUTION_ID)
 })
