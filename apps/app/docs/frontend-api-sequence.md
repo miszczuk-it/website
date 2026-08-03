@@ -28,7 +28,7 @@ Jeden `correlationId` jest generowany przed pierwszym wywołaniem i używany dla
 
 ## Partial success
 
-Frontend przechowuje:
+Frontend przechowuje w pamięci komponentu (React state):
 
 - projectId,
 - sessionId,
@@ -38,7 +38,19 @@ Frontend przechowuje:
 
 Ponowienie rozpoczyna się od pierwszego niezakończonego kroku.
 
-Frontend nie tworzy automatycznie nowego Project po częściowym sukcesie.
+**Zastrzeżenie (od `MVP-HARDEN-001`, niezależny audyt):** ochrona przed
+utworzeniem drugiego Project po częściowym sukcesie działa wyłącznie w
+ramach jednej, nieodświeżonej sesji aplikacji w przeglądarce. Stan powyżej
+żyje tylko w pamięci komponentu React, nie w `localStorage` ani
+`sessionStorage` — **nie przetrwa odświeżenia strony ani zamknięcia karty**.
+Jeżeli użytkownik odświeży stronę po błędzie sieciowym w trakcie tworzenia
+Session (Project już istnieje), a następnie ponownie wypełni formularz,
+frontend dziś utworzy nowy, drugi Project — `createProject` nie przyjmuje
+`idempotencyKey` (w przeciwieństwie do `startExecution`, gdzie backend
+gwarantuje idempotencję niezależnie od stanu przeglądarki). Backendowa
+idempotencja `createProject`, która usunie to ograniczenie, jest zakresem
+`MVP-HARDEN-002` (odłożone świadomie, nie zaimplementowane jako półśrodek
+w `MVP-HARDEN-001`).
 
 ## Koniec etapu
 
