@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createFlowState, nextIncompleteStep, runMvpFlow } from '../lib/mvp-flow.js'
-import { createArtifactVersionAndRefresh } from '../lib/artifact-flow.js'
+import { createArtifactVersionAndRefresh, decideArtifactAndRefresh } from '../lib/artifact-flow.js'
 import { EXECUTION_POLLING_STATUSES, runGuarded, trackExecutionStatus, type PollController, type SingleFlightGuard } from '../lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../lib/platform-api.js'
 import { PlatformApiError, toSafeUiError, type SafeUiError } from '../lib/safe-error.js'
 import { validateAnalysisForm, type FormErrors } from '../lib/validation.js'
 import { ArtifactReviewPanel } from './ArtifactReviewPanel.js'
 import type {
-  AnalysisFormValues, ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactVersionResponse,
+  AnalysisFormValues, ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
   ExecutionResponse, ExecutionStatus, ExecutionStatusResponse, FlowStep, MvpFlowState,
 } from '../types.js'
 
@@ -86,7 +86,9 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const [executing, setExecuting] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [artifact, setArtifact] = useState<ArtifactResponse | null>(null)
-  const [artifactVersion, setArtifactVersion] = useState<ArtifactVersionResponse | null>(null)
+  const [artifactVersions, setArtifactVersions] = useState<ArtifactVersionResponse[]>([])
+  const [artifactDecisions, setArtifactDecisions] = useState<ArtifactReviewDecisionResponse[]>([])
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
   const [creatingArtifact, setCreatingArtifact] = useState(false)
   const [submittingForReview, setSubmittingForReview] = useState(false)
   const [deciding, setDeciding] = useState(false)
@@ -213,6 +215,26 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
     }
   }
 
+  // Keeps the reviewer's chosen preview version across background refreshes
+  // triggered by unrelated actions (e.g. commenting doesn't jump the view
+  // back to current); only resets when that version no longer exists or
+  // nothing was selected yet.
+  function reconcileSelectedVersion(versions: ArtifactVersionResponse[], currentVersionId: string | null) {
+    setSelectedVersionId((current) => (current && versions.some((version) => version.artifactVersionId === current) ? current : currentVersionId))
+  }
+
+  async function refreshArtifactHistory(artifactId: string, currentVersionId: string | null, correlationId: string) {
+    try {
+      const [versions, decisions] = await Promise.all([
+        client.listArtifactVersions(artifactId, correlationId),
+        client.listArtifactReviewDecisions(artifactId, correlationId),
+      ])
+      setArtifactVersions(versions)
+      setArtifactDecisions(decisions)
+      reconcileSelectedVersion(versions, currentVersionId)
+    } catch { /* best-effort refresh; the panel keeps its last known history */ }
+  }
+
   async function createArtifactForReview() {
     if (creatingArtifact || artifact || !execution || executionStatus?.status !== 'LLM_RESULT_READY') return
     setCreatingArtifact(true); setArtifactSafeError(null); setVersionNotice(null)
@@ -224,10 +246,7 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
       ))
       if (created) {
         setArtifact(created)
-        if (created.currentVersionId) {
-          const versions = await client.listArtifactVersions(created.artifactId, correlationId)
-          setArtifactVersion(versions.find((version) => version.artifactVersionId === created.currentVersionId) ?? null)
-        }
+        await refreshArtifactHistory(created.artifactId, created.currentVersionId, correlationId)
       }
     } catch (error) {
       setArtifactSafeError(toSafeUiError(error))
@@ -245,11 +264,18 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
       const updated = await runGuarded(submitReviewGuard.current, () => client.submitArtifactForReview(
         artifact.artifactId, artifact.revision, artifact.currentVersionId!, idempotencyKey, correlationId,
       ))
-      if (updated) setArtifact(updated)
+      if (updated) {
+        setArtifact(updated)
+        await refreshArtifactHistory(updated.artifactId, updated.currentVersionId, correlationId)
+      }
     } catch (error) {
       if (error instanceof PlatformApiError && error.code === 'CONFLICT') {
         setArtifactSafeError({ message: 'Stan Artifact zmienił się w międzyczasie. Status został odświeżony.' })
-        try { setArtifact(await client.getArtifact(artifact.artifactId, correlationId)) } catch { /* best-effort refresh */ }
+        try {
+          const fresh = await client.getArtifact(artifact.artifactId, correlationId)
+          setArtifact(fresh)
+          await refreshArtifactHistory(fresh.artifactId, fresh.currentVersionId, correlationId)
+        } catch { /* best-effort refresh */ }
       } else {
         setArtifactSafeError(toSafeUiError(error))
       }
@@ -258,19 +284,30 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
     }
   }
 
-  async function decideOnArtifact(decisionType: ArtifactDecisionType, comment: string) {
-    if (deciding || !artifact || !artifact.currentVersionId) return
+  // artifactVersionId comes from the panel's currently PREVIEWED version --
+  // for APPROVE/REJECT/REQUEST_REVISION that is always the current version
+  // (the panel only offers them there), but COMMENT_ONLY may legitimately
+  // target a historical one (decideArtifact places no such restriction on
+  // COMMENT_ONLY server-side).
+  async function decideOnArtifact(decisionType: ArtifactDecisionType, comment: string, artifactVersionId: string) {
+    if (deciding || !artifact) return
     setDeciding(true); setArtifactSafeError(null); setVersionNotice(null)
     const correlationId = flow?.correlationId ?? execution?.correlationId ?? artifact.artifactId
+    const idempotencyKey = crypto.randomUUID()
     try {
-      const idempotencyKey = crypto.randomUUID()
-      const decision = await runGuarded(decisionGuard.current, () => client.createArtifactReviewDecision(
-        artifact.artifactId, artifact.currentVersionId!, decisionType, artifact.revision, idempotencyKey, correlationId, comment || undefined,
+      const result = await runGuarded(decisionGuard.current, () => decideArtifactAndRefresh(
+        client, artifact, artifactVersionId, decisionType, comment, idempotencyKey, correlationId,
       ))
-      if (decision) setArtifact(await client.getArtifact(artifact.artifactId, correlationId))
-    } catch (error) {
-      setArtifactSafeError(toSafeUiError(error))
-      try { setArtifact(await client.getArtifact(artifact.artifactId, correlationId)) } catch { /* best-effort refresh */ }
+      if (result?.outcome === 'DECIDED') {
+        setArtifact(result.artifact); setArtifactVersions(result.versions); setArtifactDecisions(result.decisions)
+        reconcileSelectedVersion(result.versions, result.artifact.currentVersionId)
+      } else if (result?.outcome === 'ERROR') {
+        setArtifactSafeError(toSafeUiError(result.error))
+        if (result.refreshed) {
+          setArtifact(result.refreshed.artifact); setArtifactVersions(result.refreshed.versions); setArtifactDecisions(result.refreshed.decisions)
+          reconcileSelectedVersion(result.refreshed.versions, result.refreshed.artifact.currentVersionId)
+        }
+      }
     } finally {
       setDeciding(false)
     }
@@ -284,18 +321,23 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   // so it stays unit-testable without a DOM harness; this handler only
   // wires guard/state around it, matching the runMvpFlow/submit() split above.
   async function createNewArtifactVersion(content: ArtifactNewVersionContent) {
-    if (creatingVersion || !artifact || artifact.status !== 'REVISION_REQUESTED' || !artifactVersion) return
+    const currentVersion = artifactVersions.find((version) => version.artifactVersionId === artifact?.currentVersionId) ?? null
+    if (creatingVersion || !artifact || artifact.status !== 'REVISION_REQUESTED' || !currentVersion) return
     setCreatingVersion(true); setArtifactSafeError(null); setVersionNotice(null)
     const correlationId = flow?.correlationId ?? execution?.correlationId ?? artifact.artifactId
     const idempotencyKey = crypto.randomUUID()
     try {
       const result = await runGuarded(createVersionGuard.current, () => createArtifactVersionAndRefresh(
-        client, artifact, artifactVersion, content, idempotencyKey, correlationId,
+        client, artifact, currentVersion, content, idempotencyKey, correlationId,
       ))
       if (result?.outcome === 'CREATED') {
-        setArtifact(result.artifact); setArtifactVersion(result.version); setVersionNotice(result.notice)
+        setArtifact(result.artifact); setArtifactVersions(result.versions); setVersionNotice(result.notice)
+        setSelectedVersionId(result.artifact.currentVersionId)
+        client.listArtifactReviewDecisions(result.artifact.artifactId, correlationId).then(setArtifactDecisions).catch(() => {})
       } else if (result?.outcome === 'CONFLICT') {
-        setArtifact(result.artifact); setArtifactVersion(result.version); setArtifactSafeError({ message: result.message })
+        setArtifact(result.artifact); setArtifactVersions(result.versions); setArtifactSafeError({ message: result.message })
+        reconcileSelectedVersion(result.versions, result.artifact.currentVersionId)
+        client.listArtifactReviewDecisions(result.artifact.artifactId, correlationId).then(setArtifactDecisions).catch(() => {})
       } else if (result?.outcome === 'ERROR') {
         setArtifactSafeError(toSafeUiError(result.error))
       }
@@ -385,7 +427,10 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
           {artifact && (
             <ArtifactReviewPanel
               artifact={artifact}
-              version={artifactVersion}
+              versions={artifactVersions}
+              decisions={artifactDecisions}
+              selectedVersionId={selectedVersionId}
+              onSelectVersion={setSelectedVersionId}
               submittingForReview={submittingForReview}
               deciding={deciding}
               creatingVersion={creatingVersion}

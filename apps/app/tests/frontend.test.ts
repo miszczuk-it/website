@@ -5,7 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AnalysisWorkspace, ExecutionStatusPanel } from '../src/components/AnalysisWorkspace.js'
 import { ArtifactReviewPanel } from '../src/components/ArtifactReviewPanel.js'
-import { createArtifactVersionAndRefresh } from '../src/lib/artifact-flow.js'
+import { createArtifactVersionAndRefresh, decideArtifactAndRefresh } from '../src/lib/artifact-flow.js'
 import { createFlowState, runMvpFlow } from '../src/lib/mvp-flow.js'
 import { runGuarded, trackExecutionStatus, type SingleFlightGuard } from '../src/lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../src/lib/platform-api.js'
@@ -382,14 +382,14 @@ test('Artifact list endpoints reject a non-array response as INVALID_RESPONSE', 
 
 test('ArtifactReviewPanel presents both contentText and contentJson version shapes', () => {
   const textHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: BASE_ARTIFACT, version: BASE_ARTIFACT_VERSION, submittingForReview: false, deciding: false,
+    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, submittingForReview: false, deciding: false,
     safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
   }))
   assert.ok(textHtml.includes('Treść wyniku analizy Business Analyst.'))
 
   const jsonVersion: ArtifactVersionResponse = { ...BASE_ARTIFACT_VERSION, contentText: undefined, contentJson: { summary: 'ok' } }
   const jsonHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: BASE_ARTIFACT, version: jsonVersion, submittingForReview: false, deciding: false,
+    artifact: BASE_ARTIFACT, versions: [jsonVersion], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, submittingForReview: false, deciding: false,
     safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
   }))
   assert.ok(jsonHtml.includes('summary'))
@@ -398,7 +398,7 @@ test('ArtifactReviewPanel presents both contentText and contentJson version shap
 
 test('ArtifactReviewPanel status matrix: DRAFT offers submit, hides all decisions', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: BASE_ARTIFACT, version: BASE_ARTIFACT_VERSION, submittingForReview: false, deciding: false,
+    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, submittingForReview: false, deciding: false,
     safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
   }))
   assert.ok(html.includes('Prześlij do przeglądu'))
@@ -407,7 +407,7 @@ test('ArtifactReviewPanel status matrix: DRAFT offers submit, hides all decision
 
 test('ArtifactReviewPanel status matrix: READY_FOR_REVIEW offers all four decisions, hides submit', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, version: BASE_ARTIFACT_VERSION,
+    artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
     submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
   }))
   assert.equal(html.includes('Prześlij do przeglądu'), false)
@@ -417,14 +417,14 @@ test('ArtifactReviewPanel status matrix: READY_FOR_REVIEW offers all four decisi
 test('ArtifactReviewPanel status matrix: APPROVED/REJECTED/REVISION_REQUESTED only offer a comment, ARCHIVED offers nothing', () => {
   for (const status of ['APPROVED', 'REJECTED', 'REVISION_REQUESTED'] as const) {
     const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-      artifact: { ...BASE_ARTIFACT, status, revision: 2 }, version: BASE_ARTIFACT_VERSION,
+      artifact: { ...BASE_ARTIFACT, status, revision: 2 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
       submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
     }))
     assert.ok(html.includes('Dodaj komentarz'), status)
     for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę']) assert.equal(html.includes(decision), false, `${status}/${decision}`)
   }
   const archivedHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: { ...BASE_ARTIFACT, status: 'ARCHIVED', revision: 3 }, version: BASE_ARTIFACT_VERSION,
+    artifact: { ...BASE_ARTIFACT, status: 'ARCHIVED', revision: 3 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
     submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
   }))
   for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz', 'Prześlij do przeglądu']) {
@@ -434,7 +434,7 @@ test('ArtifactReviewPanel status matrix: APPROVED/REJECTED/REVISION_REQUESTED on
 
 test('ArtifactReviewPanel disables comment-requiring decisions until a comment is typed, never disables APPROVE', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, version: BASE_ARTIFACT_VERSION,
+    artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
     submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
   }))
   const buttonPattern = /<button[^>]*>([^<]+)<\/button>/g
@@ -447,7 +447,7 @@ test('ArtifactReviewPanel disables comment-requiring decisions until a comment i
 test('ArtifactReviewPanel never fires a decision on render -- no automatic actions', () => {
   let calls = 0
   renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, version: BASE_ARTIFACT_VERSION,
+    artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
     submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => { calls += 1 }, onDecide: () => { calls += 1 },
   }))
   assert.equal(calls, 0)
@@ -455,7 +455,7 @@ test('ArtifactReviewPanel never fires a decision on render -- no automatic actio
 
 test('ArtifactReviewPanel renders a safe error message without leaking raw response shape', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, version: BASE_ARTIFACT_VERSION,
+    artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
     submittingForReview: false, deciding: false, safeErrorMessage: 'Dane zostały zmienione. Odśwież stan przed ponowieniem.',
     onSubmitForReview: () => {}, onDecide: () => {},
   }))
@@ -474,7 +474,7 @@ const noopPanelProps = { submittingForReview: false, deciding: false, safeErrorM
 
 test('1. REVISION_REQUESTED shows the new-version form', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: REVISION_REQUESTED_ARTIFACT, version: BASE_ARTIFACT_VERSION, creatingVersion: false, versionNotice: null,
+    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: false, versionNotice: null,
     onCreateVersion: () => {}, ...noopPanelProps,
   }))
   assert.ok(html.includes('Nowa wersja'))
@@ -486,7 +486,7 @@ test('2. other statuses do not show the new-version form', () => {
     { ...BASE_ARTIFACT, status: 'APPROVED', revision: 2 } as ArtifactResponse, { ...BASE_ARTIFACT, status: 'REJECTED', revision: 2 } as ArtifactResponse,
     { ...BASE_ARTIFACT, status: 'ARCHIVED', revision: 5 } as ArtifactResponse]) {
     const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-      artifact, version: BASE_ARTIFACT_VERSION, creatingVersion: false, versionNotice: null, onCreateVersion: () => {}, ...noopPanelProps,
+      artifact, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: false, versionNotice: null, onCreateVersion: () => {}, ...noopPanelProps,
     }))
     assert.equal(html.includes('Utwórz nową wersję'), false, artifact.status)
   }
@@ -639,7 +639,7 @@ test('ArtifactReviewPanel shows a safe validation message and never sends the re
   // version carries contentJson, matching the "form mode follows current
   // version" requirement.
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: REVISION_REQUESTED_ARTIFACT, version: BASE_ARTIFACT_VERSION_JSON, creatingVersion: false, versionNotice: null,
+    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION_JSON], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: false, versionNotice: null,
     onCreateVersion: () => {}, ...noopPanelProps,
   }))
   assert.ok(html.includes('Treść (JSON)'))
@@ -648,14 +648,123 @@ test('ArtifactReviewPanel shows a safe validation message and never sends the re
 
 test('ArtifactReviewPanel new-version button is disabled while creatingVersion, and shows a success notice after creation', () => {
   const busyHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: REVISION_REQUESTED_ARTIFACT, version: BASE_ARTIFACT_VERSION, creatingVersion: true, versionNotice: null,
+    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: true, versionNotice: null,
     onCreateVersion: () => {}, ...noopPanelProps,
   }))
   assert.match(busyHtml, /Tworzenie…[\s\S]*?disabled=""|disabled=""[\s\S]*?Tworzenie…/)
 
   const noticeHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: BASE_ARTIFACT, version: BASE_ARTIFACT_VERSION, creatingVersion: false, versionNotice: 'Nowa wersja została utworzona.',
+    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: false, versionNotice: 'Nowa wersja została utworzona.',
     onCreateVersion: () => {}, ...noopPanelProps,
   }))
   assert.ok(noticeHtml.includes('Nowa wersja została utworzona.'))
+})
+
+// --- Version history + decision history (missing scope closed in this follow-up) ---
+
+const CURRENT_ARTIFACT_VERSION_V2: ArtifactVersionResponse = {
+  ...BASE_ARTIFACT_VERSION, artifactVersionId: NEW_ARTIFACT_VERSION_ID, versionNumber: 2, contentText: 'Nowa treść po poprawkach.',
+}
+const ARTIFACT_WITH_TWO_VERSIONS: ArtifactResponse = { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1, currentVersionId: NEW_ARTIFACT_VERSION_ID }
+
+test('version history lists both current and historical versions with the right labels', () => {
+  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: ARTIFACT_WITH_TWO_VERSIONS, versions: [BASE_ARTIFACT_VERSION, CURRENT_ARTIFACT_VERSION_V2], decisions: [],
+    selectedVersionId: null, onSelectVersion: () => {}, ...noopPanelProps,
+  }))
+  assert.ok(html.includes('Wersja 1'))
+  assert.ok(html.includes('Wersja 2'))
+  assert.ok(html.includes('Bieżąca'))
+  assert.ok(html.includes('Historyczna'))
+  assert.ok(html.includes(BASE_ARTIFACT_VERSION.createdByType))
+})
+
+test('selecting a historical version previews its content and hides state-changing decisions, keeping COMMENT_ONLY', () => {
+  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: ARTIFACT_WITH_TWO_VERSIONS, versions: [BASE_ARTIFACT_VERSION, CURRENT_ARTIFACT_VERSION_V2], decisions: [],
+    selectedVersionId: BASE_ARTIFACT_VERSION.artifactVersionId, onSelectVersion: () => {}, ...noopPanelProps,
+  }))
+  assert.ok(html.includes('Treść wyniku analizy Business Analyst.'), 'must preview the selected historical version, not current')
+  assert.equal(html.includes('Nowa treść po poprawkach.'), false, 'must not preview current while a historical version is selected')
+  for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę']) assert.equal(html.includes(decision), false, decision)
+  assert.ok(html.includes('Dodaj komentarz'), 'COMMENT_ONLY must remain available for a historical version (decideArtifact places no such restriction on it)')
+})
+
+test('no selection defaults to previewing the current version', () => {
+  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: ARTIFACT_WITH_TWO_VERSIONS, versions: [BASE_ARTIFACT_VERSION, CURRENT_ARTIFACT_VERSION_V2], decisions: [],
+    selectedVersionId: null, onSelectVersion: () => {}, ...noopPanelProps,
+  }))
+  assert.ok(html.includes('Nowa treść po poprawkach.'))
+  assert.equal(html.includes('Treść wyniku analizy Business Analyst.'), false)
+})
+
+test('APPROVE/REJECT/REQUEST_REVISION remain available when the current version is selected', () => {
+  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: ARTIFACT_WITH_TWO_VERSIONS, versions: [BASE_ARTIFACT_VERSION, CURRENT_ARTIFACT_VERSION_V2], decisions: [],
+    selectedVersionId: CURRENT_ARTIFACT_VERSION_V2.artifactVersionId, onSelectVersion: () => {}, ...noopPanelProps,
+  }))
+  for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz']) assert.ok(html.includes(decision), decision)
+})
+
+test('decision history renders decisionType, comment, actorReference, createdAt and the target version, without technical fields', () => {
+  const decision: ArtifactReviewDecisionResponse = {
+    contractVersion: '1.0', decisionId: DECISION_ID, artifactId: ARTIFACT_ID, artifactVersionId: ARTIFACT_VERSION_ID,
+    decisionType: 'REQUEST_REVISION', comment: 'Proszę dodać więcej szczegółów.', actorType: 'HUMAN', actorReference: 'human:reviewer-42',
+    idempotencyKey: 'super-secret-idempotency-key', createdAt: '2026-01-02T10:00:00.000Z',
+  }
+  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [decision], selectedVersionId: null, onSelectVersion: () => {}, ...noopPanelProps,
+  }))
+  assert.ok(html.includes('Poproś o poprawę'))
+  assert.ok(html.includes('Proszę dodać więcej szczegółów.'))
+  assert.ok(html.includes('human:reviewer-42'))
+  assert.ok(html.includes('2026-01-02T10:00:00.000Z'))
+  assert.ok(html.includes('wersja 1'))
+  for (const forbidden of ['super-secret-idempotency-key', decision.decisionId, 'requestFingerprint', 'idempotencyKey']) {
+    assert.equal(html.includes(forbidden), false, forbidden)
+  }
+})
+
+test('decision history shows an empty state when there are no decisions yet', () => {
+  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, ...noopPanelProps,
+  }))
+  assert.ok(html.includes('Brak decyzji.'))
+})
+
+test('decideArtifactAndRefresh: success refreshes Artifact, versions and decisions in one snapshot', async () => {
+  let getArtifactCalls = 0, listVersionCalls = 0, listDecisionCalls = 0
+  const decidedArtifact: ArtifactResponse = { ...BASE_ARTIFACT, status: 'APPROVED', revision: 2 }
+  const newDecision = { ...BASE_DECISION, decisionType: 'APPROVE' as const }
+  const client = successfulClient({
+    createArtifactReviewDecision: async () => newDecision,
+    getArtifact: async () => { getArtifactCalls += 1; return decidedArtifact },
+    listArtifactVersions: async () => { listVersionCalls += 1; return [BASE_ARTIFACT_VERSION] },
+    listArtifactReviewDecisions: async () => { listDecisionCalls += 1; return [newDecision] },
+  })
+  const result = await decideArtifactAndRefresh(client, BASE_ARTIFACT, ARTIFACT_VERSION_ID, 'APPROVE', '', 'idem-decision', 'correlation')
+  assert.equal(result.outcome, 'DECIDED')
+  if (result.outcome !== 'DECIDED') throw new Error('unreachable')
+  assert.equal(getArtifactCalls, 1)
+  assert.equal(listVersionCalls, 1)
+  assert.equal(listDecisionCalls, 1)
+  assert.equal(result.artifact.status, 'APPROVED')
+  assert.deepEqual(result.decisions, [newDecision])
+})
+
+test('decideArtifactAndRefresh: a failed decision still refreshes read-only state without retrying the write', async () => {
+  let decisionCalls = 0
+  const client = successfulClient({
+    createArtifactReviewDecision: async () => { decisionCalls += 1; throw new PlatformApiError('REVIEW_ALREADY_COMPLETED', 'correlation', 409) },
+    getArtifact: async () => ({ ...BASE_ARTIFACT, status: 'APPROVED', revision: 3 }),
+    listArtifactReviewDecisions: async () => [BASE_DECISION],
+  })
+  const result = await decideArtifactAndRefresh(client, BASE_ARTIFACT, ARTIFACT_VERSION_ID, 'APPROVE', '', 'idem-decision', 'correlation')
+  assert.equal(result.outcome, 'ERROR')
+  assert.equal(decisionCalls, 1, 'the write must not be retried automatically')
+  if (result.outcome !== 'ERROR') throw new Error('unreachable')
+  assert.ok(result.refreshed)
+  assert.equal(result.refreshed?.artifact.status, 'APPROVED')
+  assert.deepEqual(result.refreshed?.decisions, [BASE_DECISION])
 })
