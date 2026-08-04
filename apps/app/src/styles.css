@@ -28,8 +28,10 @@ button { border: 1px solid #aeb9ca; border-radius: 9px; padding: 10px 16px; back
 button:disabled { cursor: not-allowed; opacity: .48; }
 .primary { justify-self: start; border-color: #155eef; background: #155eef; color: white; font-weight: 800; }
 .status { display: inline-flex; border-radius: 999px; padding: 7px 12px; background: #e9eef7; font-weight: 800; }
-.status-failed { background: #fee4e2; color: #b42318; }
-.status-ready_for_execution { background: #dcfae6; color: #067647; }
+.status-failed, .status-failed_final { background: #fee4e2; color: #b42318; }
+.status-ready_for_execution, .status-llm_result_ready { background: #dcfae6; color: #067647; }
+.status-failed_retryable { background: #fef0c7; color: #93370d; }
+.status-unknown { background: #eaecf5; color: #363f72; }
 .result-grid { display: grid; grid-template-columns: minmax(120px, 180px) 1fr; gap: 8px 16px; }
 .result-grid dt { font-weight: 800; }
 .result-grid dd { margin: 0; overflow-wrap: anywhere; }
