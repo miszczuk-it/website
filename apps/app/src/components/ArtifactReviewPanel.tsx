@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { validateNewVersionContent } from '../lib/validation.js'
-import type { ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactVersionResponse } from '../types.js'
+import type { ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse } from '../types.js'
 
 const DECISIONS_REQUIRING_COMMENT: ArtifactDecisionType[] = ['REJECT', 'REQUEST_REVISION', 'COMMENT_ONLY']
 
@@ -23,32 +23,48 @@ function decisionsFor(status: ArtifactResponse['status']): ArtifactDecisionType[
 
 type Props = {
   artifact: ArtifactResponse
-  version: ArtifactVersionResponse | null
+  versions: ArtifactVersionResponse[]
+  decisions: ArtifactReviewDecisionResponse[]
+  selectedVersionId: string | null
+  onSelectVersion: (versionId: string) => void
   submittingForReview: boolean
   deciding: boolean
   creatingVersion?: boolean
   safeErrorMessage: string | null
   versionNotice?: string | null
   onSubmitForReview: () => void
-  onDecide: (decisionType: ArtifactDecisionType, comment: string) => void
+  onDecide: (decisionType: ArtifactDecisionType, comment: string, artifactVersionId: string) => void
   onCreateVersion?: (content: ArtifactNewVersionContent) => void
 }
 
 export function ArtifactReviewPanel({
-  artifact, version, submittingForReview, deciding, creatingVersion = false, safeErrorMessage, versionNotice = null,
+  artifact, versions, decisions, selectedVersionId, onSelectVersion,
+  submittingForReview, deciding, creatingVersion = false, safeErrorMessage, versionNotice = null,
   onSubmitForReview, onDecide, onCreateVersion = () => {},
 }: Props) {
   const [comment, setComment] = useState('')
   const [newVersionText, setNewVersionText] = useState('')
   const [newVersionJson, setNewVersionJson] = useState('')
   const [newVersionError, setNewVersionError] = useState<string | null>(null)
-  const availableDecisions = decisionsFor(artifact.status)
-  const isJsonMode = version ? typeof version.contentJson === 'object' && version.contentJson !== null : false
+
+  const currentVersion = versions.find((version) => version.artifactVersionId === artifact.currentVersionId) ?? null
+  const selectedVersion = versions.find((version) => version.artifactVersionId === selectedVersionId) ?? currentVersion
+  const isCurrentVersionSelected = selectedVersion ? selectedVersion.artifactVersionId === artifact.currentVersionId : true
+  // The new-version form's mode always follows the CURRENT version (the one
+  // being superseded), never whatever the reviewer happens to be previewing.
+  const isJsonMode = currentVersion ? typeof currentVersion.contentJson === 'object' && currentVersion.contentJson !== null : false
+
+  // APPROVE/REJECT/REQUEST_REVISION are state-changing and, per the backend
+  // (decideArtifact), only ever valid against the current version out of
+  // READY_FOR_REVIEW -- never a historical one. COMMENT_ONLY carries no such
+  // restriction server-side, so it stays available while previewing history.
+  const statusDecisions = decisionsFor(artifact.status)
+  const availableDecisions = isCurrentVersionSelected ? statusDecisions : statusDecisions.filter((decision) => decision === 'COMMENT_ONLY')
 
   function submitDecision(decisionType: ArtifactDecisionType) {
-    if (deciding) return
+    if (deciding || !selectedVersion) return
     if (DECISIONS_REQUIRING_COMMENT.includes(decisionType) && comment.trim() === '') return
-    onDecide(decisionType, comment.trim())
+    onDecide(decisionType, comment.trim(), selectedVersion.artifactVersionId)
     setComment('')
   }
 
@@ -73,10 +89,38 @@ export function ArtifactReviewPanel({
       </dl>
       <p role="status" className={`status status-${artifact.status.toLowerCase()}`}>{artifact.status}</p>
 
-      {version && (
+      {versions.length > 0 && (
+        <div className="artifact-version-history">
+          <h3>Wersje</h3>
+          <ul>
+            {versions.map((version) => {
+              const isCurrent = version.artifactVersionId === artifact.currentVersionId
+              const isSelected = version.artifactVersionId === selectedVersion?.artifactVersionId
+              return (
+                <li key={version.artifactVersionId}>
+                  <button
+                    type="button"
+                    className={isSelected ? 'primary' : undefined}
+                    aria-pressed={isSelected}
+                    onClick={() => onSelectVersion(version.artifactVersionId)}
+                  >
+                    Wersja {version.versionNumber}
+                    <span className={`version-badge ${isCurrent ? 'version-badge-current' : 'version-badge-historical'}`}>
+                      {isCurrent ? 'Bieżąca' : 'Historyczna'}
+                    </span>
+                    <span className="version-meta">{version.createdByType} · {version.createdAt}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+
+      {selectedVersion && (
         <div className="artifact-version-content">
-          {typeof version.contentText === 'string' && <pre>{version.contentText}</pre>}
-          {version.contentJson && <pre>{JSON.stringify(version.contentJson, null, 2)}</pre>}
+          {typeof selectedVersion.contentText === 'string' && <pre>{selectedVersion.contentText}</pre>}
+          {selectedVersion.contentJson && <pre>{JSON.stringify(selectedVersion.contentJson, null, 2)}</pre>}
         </div>
       )}
 
@@ -110,8 +154,9 @@ export function ArtifactReviewPanel({
         </div>
       )}
 
-      {availableDecisions.length > 0 && (
+      {availableDecisions.length > 0 && selectedVersion && (
         <div className="artifact-decisions">
+          {!isCurrentVersionSelected && <p className="notice-inline">Podgląd wersji historycznej — dostępny tylko komentarz.</p>}
           <label htmlFor="artifact-decision-comment">Komentarz</label>
           <textarea id="artifact-decision-comment" value={comment} onChange={(event) => setComment(event.target.value)} maxLength={5000} />
           <div className="artifact-decision-buttons">
@@ -132,6 +177,27 @@ export function ArtifactReviewPanel({
           </div>
         </div>
       )}
+
+      <div className="artifact-decision-history">
+        <h3>Historia decyzji</h3>
+        {decisions.length === 0 ? (
+          <p>Brak decyzji.</p>
+        ) : (
+          <ul>
+            {decisions.map((decision) => {
+              const targetVersion = versions.find((version) => version.artifactVersionId === decision.artifactVersionId)
+              return (
+                <li key={decision.decisionId}>
+                  <strong>{DECISION_LABELS[decision.decisionType]}</strong>
+                  {targetVersion && <span className="version-meta"> · wersja {targetVersion.versionNumber}</span>}
+                  <span className="version-meta"> · {decision.actorReference} · {decision.createdAt}</span>
+                  {decision.comment && <p>{decision.comment}</p>}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }

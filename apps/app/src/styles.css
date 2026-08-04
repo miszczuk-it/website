@@ -42,6 +42,15 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .artifact-decision-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .artifact-new-version-form { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d9e0eb; }
 .artifact-new-version-form textarea { min-height: 160px; font-family: ui-monospace, monospace; }
+.artifact-version-history ul, .artifact-decision-history ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.artifact-version-history button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
+.version-badge { border-radius: 999px; padding: 3px 10px; font-size: .75rem; font-weight: 800; }
+.version-badge-current { background: #dcfae6; color: #067647; }
+.version-badge-historical { background: #eaecf5; color: #363f72; }
+.version-meta { color: #667085; font-size: .8rem; font-weight: 600; }
+.artifact-decision-history li { padding: 10px 12px; border: 1px solid #d9e0eb; border-radius: 10px; }
+.artifact-decision-history li p { margin: 6px 0 0; }
+.notice-inline { color: #93370d; font-weight: 700; font-size: .875rem; }
 
 @media (max-width: 640px) {
   .app-shell { width: min(100% - 20px, 960px); padding-top: 32px; }
