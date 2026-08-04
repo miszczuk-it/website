@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createFlowState, nextIncompleteStep, runMvpFlow } from '../lib/mvp-flow.js'
-import { startAndTrackExecution, type ExecutionTrackingState } from '../lib/execution-flow.js'
+import { EXECUTION_POLLING_STATUSES, runGuarded, trackExecutionStatus, type PollController, type SingleFlightGuard } from '../lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../lib/platform-api.js'
-import { toSafeUiError, type SafeUiError } from '../lib/safe-error.js'
+import { PlatformApiError, toSafeUiError, type SafeUiError } from '../lib/safe-error.js'
 import { validateAnalysisForm, type FormErrors } from '../lib/validation.js'
-import type { AnalysisFormValues, FlowStep, MvpFlowState } from '../types.js'
+import type { AnalysisFormValues, ExecutionResponse, ExecutionStatus, ExecutionStatusResponse, FlowStep, MvpFlowState } from '../types.js'
 
 const EMPTY_FORM: AnalysisFormValues = { projectName: '', goal: '', taskDescription: '' }
 const BUSY_STEPS: FlowStep[] = ['VALIDATING', 'CREATING_PROJECT', 'CREATING_SESSION', 'STARTING_SESSION', 'CREATING_TASK', 'MARKING_TASK_READY']
@@ -15,6 +15,52 @@ const STEP_LABELS: Record<FlowStep, string> = {
   STARTING_SESSION: 'Uruchamianie sesji', CREATING_TASK: 'Tworzenie zadania',
   MARKING_TASK_READY: 'Oznaczanie zadania jako gotowe',
   READY_FOR_EXECUTION: 'Gotowe do uruchomienia', FAILED: 'Przepływ zatrzymany',
+}
+
+const EXECUTION_STATUS_MESSAGES: Partial<Record<ExecutionStatus, string>> = {
+  WAITING_FOR_LLM_GATEWAY: 'Analiza oczekuje na wysłanie do LLM Gateway.',
+  RUNNING: 'Analiza jest wykonywana.',
+  LLM_RESULT_READY: 'Wynik analizy jest gotowy.',
+  FAILED_RETRYABLE: 'Analiza nie powiodła się. Można ją ponowić.',
+  UNKNOWN: 'Stan analizy wymaga weryfikacji.',
+}
+
+const DEFAULT_FAILED_FINAL_MESSAGE = 'Analiza zakończyła się błędem, którego nie można ponowić.'
+
+type ExecutionStatusPanelProps = {
+  executionStatus: ExecutionStatusResponse
+  retrying: boolean
+  onRetry: () => void
+}
+
+export function ExecutionStatusPanel({ executionStatus, retrying, onRetry }: ExecutionStatusPanelProps) {
+  const s = executionStatus
+  const hasCachedTokens = typeof s.cachedInputTokens === 'number'
+  return (
+    <div className="execution-status-panel">
+      <dl className="result-grid">
+        <dt>Status analizy</dt><dd>{s.status}</dd>
+        <dt>Status próby</dt><dd>{s.attemptStatus ?? '—'}</dd>
+        <dt>Numer próby</dt><dd>{s.attemptNumber ?? '—'}</dd>
+        <dt>Model</dt><dd>{s.model ?? '—'}</dd>
+        <dt>Provider</dt><dd>{s.provider ?? '—'}</dd>
+        <dt>Tokeny wejściowe</dt><dd>{s.inputTokens ?? '—'}</dd>
+        <dt>Tokeny wyjściowe</dt><dd>{s.outputTokens ?? '—'}</dd>
+        {hasCachedTokens && <><dt>Tokeny wejściowe z cache</dt><dd>{s.cachedInputTokens}</dd></>}
+        <dt>Tokeny łącznie</dt><dd>{s.totalTokens ?? '—'}</dd>
+        <dt>Koszt</dt><dd>{s.actualCost ?? '—'}</dd>
+        <dt>Waluta</dt><dd>{s.currency ?? '—'}</dd>
+        <dt>Zaktualizowano</dt><dd>{s.updatedAt}</dd>
+      </dl>
+      <p role="status" className={`status status-${s.status.toLowerCase()}`}>{EXECUTION_STATUS_MESSAGES[s.status] ?? s.status}</p>
+      {s.status === 'FAILED_FINAL' && <p role="alert">{s.safeErrorMessage ?? DEFAULT_FAILED_FINAL_MESSAGE}</p>}
+      {s.retryAllowed && (
+        <button className="primary" type="button" onClick={onRetry} disabled={retrying}>
+          {retrying ? 'Ponawianie…' : 'Ponów analizę'}
+        </button>
+      )}
+    </div>
+  )
 }
 
 type Props = {
@@ -30,10 +76,15 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const [errors, setErrors] = useState<FormErrors>({})
   const [flow, setFlow] = useState<MvpFlowState | null>(null)
   const [safeError, setSafeError] = useState<SafeUiError | null>(null)
-  const [execution, setExecution] = useState<ExecutionTrackingState | null>(null)
+  const [execution, setExecution] = useState<ExecutionResponse | null>(null)
+  const [executionStatus, setExecutionStatus] = useState<ExecutionStatusResponse | null>(null)
+  const [executing, setExecuting] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const submitting = useRef(false)
-  const startingExecution = useRef(false)
+  const startGuard = useRef<SingleFlightGuard>({ busy: false })
+  const retryGuard = useRef<SingleFlightGuard>({ busy: false })
   const executionIdempotencyKey = useRef<string | null>(null)
+  const pollController = useRef<PollController | null>(null)
   const projectNameInput = useRef<HTMLInputElement>(null)
   const goalInput = useRef<HTMLTextAreaElement>(null)
   const taskInput = useRef<HTMLTextAreaElement>(null)
@@ -42,6 +93,9 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const isBusy = BUSY_STEPS.includes(step)
   const hasCreatedState = Boolean(flow?.projectId)
   const failedStep = flow?.step === 'FAILED' ? nextIncompleteStep(flow) : null
+
+  // Stop polling on unmount -- no orphaned intervals outliving the view.
+  useEffect(() => () => { pollController.current?.stop() }, [])
 
   function updateField(field: keyof AnalysisFormValues, value: string) {
     setValues((current) => ({ ...current, [field]: value }))
@@ -70,16 +124,75 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
     submitting.current = false
   }
 
+  function handleStatusUpdate(status: ExecutionStatusResponse, correlationId: string) {
+    setExecutionStatus(status)
+    if (!EXECUTION_POLLING_STATUSES.has(status.status)) {
+      // The composed status read model never carries `revision` (it is
+      // intentionally not part of that contract) -- refresh the plain
+      // Execution resource once a terminal status is reached so a retry,
+      // if allowed, has a current `expectedRevision` to send.
+      client.getExecution(status.executionId, correlationId).then(setExecution).catch(() => {})
+    }
+  }
+
+  function beginPolling(executionId: string, correlationId: string, initialStatus: ExecutionStatus) {
+    pollController.current?.stop()
+    pollController.current = EXECUTION_POLLING_STATUSES.has(initialStatus)
+      ? trackExecutionStatus(client, { executionId, correlationId }, { onState: (status) => handleStatusUpdate(status, correlationId) })
+      : null
+  }
+
   async function execute() {
-    if (startingExecution.current || flow?.step !== 'READY_FOR_EXECUTION' || !flow.taskId || flow.taskRevision === null) return
-    startingExecution.current = true; setSafeError(null)
+    if (executing || flow?.step !== 'READY_FOR_EXECUTION' || !flow.taskId || flow.taskRevision === null) return
+    setExecuting(true); setSafeError(null)
     executionIdempotencyKey.current ??= crypto.randomUUID()
-    const result = await startAndTrackExecution(client, {
-      taskId: flow.taskId, taskRevision: flow.taskRevision, correlationId: flow.correlationId,
-      idempotencyKey: executionIdempotencyKey.current,
-    }, { onState: setExecution })
-    if (result.error) setSafeError(toSafeUiError(result.error))
-    startingExecution.current = false
+    const { taskId, taskRevision, correlationId } = flow
+    try {
+      const started = await runGuarded(startGuard.current, () => client.startExecution(taskId, taskRevision, executionIdempotencyKey.current!, correlationId))
+      if (started) {
+        setExecution(started)
+        const status = await client.getExecutionStatus(started.executionId, correlationId)
+        handleStatusUpdate(status, correlationId)
+        beginPolling(started.executionId, correlationId, status.status)
+      }
+    } catch (error) {
+      setSafeError(toSafeUiError(error))
+    } finally {
+      setExecuting(false)
+    }
+  }
+
+  async function retry() {
+    if (retrying || !execution || !executionStatus?.retryAllowed) return
+    setRetrying(true); setSafeError(null)
+    const correlationId = flow?.correlationId ?? execution.correlationId
+    try {
+      const idempotencyKey = crypto.randomUUID()
+      const retried = await runGuarded(retryGuard.current, () => client.retryExecution(
+        execution.executionId, execution.revision, 'Ponowienie analizy przez użytkownika.', idempotencyKey, correlationId,
+      ))
+      if (retried) {
+        setExecution(retried)
+        const status = await client.getExecutionStatus(retried.executionId, correlationId)
+        handleStatusUpdate(status, correlationId)
+        beginPolling(retried.executionId, correlationId, status.status)
+      }
+    } catch (error) {
+      if (error instanceof PlatformApiError && error.code === 'CONFLICT') {
+        setSafeError({ message: 'Stan analizy zmienił się w międzyczasie. Status został odświeżony.' })
+        try {
+          const [freshExecution, freshStatus] = await Promise.all([
+            client.getExecution(execution.executionId, correlationId),
+            client.getExecutionStatus(execution.executionId, correlationId),
+          ])
+          setExecution(freshExecution); setExecutionStatus(freshStatus)
+        } catch { /* best-effort refresh; the panel keeps its last known state */ }
+      } else {
+        setSafeError(toSafeUiError(error))
+      }
+    } finally {
+      setRetrying(false)
+    }
   }
 
   return (
@@ -88,7 +201,7 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
         <p className="eyebrow">AI Platform · app.miszczuk.it</p>
         {appEnvironment === 'DEV' && <p className="environment-badge" role="status">Środowisko DEV</p>}
         <h1>Przygotuj analizę projektu</h1>
-        <p>Utwórz Project, Session i zadanie Business Analyst. Analiza zostanie uruchomiona dopiero w kolejnym etapie MVP.</p>
+        <p>Utwórz Project, Session i zadanie Business Analyst, a następnie uruchom analizę LLM.</p>
       </header>
 
       {!apiEnabled && <div className="notice" role="status">Formularz działa w bezpiecznym trybie podglądu. Platform API jest domyślnie wyłączone.</div>}
@@ -132,18 +245,24 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
           <dt>Task ID</dt><dd>{flow.taskId ?? 'Jeszcze nie utworzono'}</dd>
           <dt>Task status</dt><dd>{flow.taskId ? (flow.taskRevision === 0 ? 'CREATED' : 'READY') : '—'}</dd>
         </dl> : <p>Nie utworzono jeszcze elementów procesu.</p>}
-        {step === 'READY_FOR_EXECUTION' && <p className="success-message">Zadanie jest gotowe do uruchomienia w kolejnym etapie MVP.</p>}
-        {step === 'READY_FOR_EXECUTION' && <button className="primary" type="button" onClick={execute}
-          disabled={!apiEnabled || execution?.status === 'STARTING_EXECUTION' || execution?.status === 'BUILDING_CONTEXT' || execution?.status === 'WAITING_FOR_LLM_GATEWAY'}>
-          Uruchom wykonanie
-        </button>}
-        {execution && <dl className="result-grid">
-          <dt>Execution ID</dt><dd>{execution.executionId ?? 'Tworzenie…'}</dd>
-          <dt>Execution status</dt><dd>{execution.status}</dd>
-        </dl>}
-        {execution?.status === 'BUILDING_CONTEXT' && <p>Trwa przygotowanie kontekstu.</p>}
-        {execution?.status === 'WAITING_FOR_LLM_GATEWAY' && <p className="success-message">Kontekst został przygotowany. Zadanie oczekuje na uruchomienie LLM Gateway.</p>}
-        <p>Analiza nie została jeszcze uruchomiona. Funkcje decyzji Human in the Loop będą dostępne po utworzeniu Artifact Version.</p>
+        {step === 'READY_FOR_EXECUTION' && !execution && (
+          <>
+            <p className="success-message">Zadanie jest gotowe do uruchomienia.</p>
+            <button className="primary" type="button" onClick={execute} disabled={!apiEnabled || executing}>
+              {executing ? 'Uruchamianie…' : 'Uruchom analizę'}
+            </button>
+          </>
+        )}
+        {execution && (
+          <>
+            <dl className="result-grid">
+              <dt>Execution ID</dt><dd>{execution.executionId}</dd>
+            </dl>
+            {executionStatus
+              ? <ExecutionStatusPanel executionStatus={executionStatus} retrying={retrying} onRetry={retry} />
+              : <p>Uruchamianie analizy…</p>}
+          </>
+        )}
       </section>
     </main>
   )

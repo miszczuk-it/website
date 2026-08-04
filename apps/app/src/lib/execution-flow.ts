@@ -1,39 +1,63 @@
-import type { ExecutionResponse, ExecutionStatus } from '../types.js'
+import type { ExecutionStatus, ExecutionStatusResponse } from '../types.js'
 import type { PlatformApiClient } from './platform-api.js'
 
-export type ExecutionTrackingState = {
-  executionId: string | null
-  status: ExecutionStatus | 'STARTING_EXECUTION' | 'FAILED'
-  error: unknown | null
-}
+// Statuses where the LLM Gateway lifecycle is still in flight and the
+// frontend keeps polling GET /executions/:id/status (MVP-IMPL-004C.2+ API).
+// Everything else (LLM_RESULT_READY, FAILED_RETRYABLE, FAILED_FINAL,
+// UNKNOWN, and any other status the backend may report) is treated as a
+// stopping point -- polling never guesses beyond what the API states.
+export const EXECUTION_POLLING_STATUSES = new Set<ExecutionStatus>(['WAITING_FOR_LLM_GATEWAY', 'RUNNING'])
 
-type Options = {
+export type PollController = { stop: () => void; whenDone: Promise<void> }
+
+type PollOptions = {
   intervalMs?: number
-  maxPolls?: number
   wait?: (milliseconds: number) => Promise<void>
-  onState?: (state: ExecutionTrackingState) => void
+  onState?: (status: ExecutionStatusResponse) => void
+  onError?: (error: unknown) => void
 }
 
-const TERMINAL_FOR_MVP = new Set<ExecutionStatus>(['WAITING_FOR_LLM_GATEWAY', 'COMPLETED', 'FAILED_RETRYABLE', 'FAILED_FINAL', 'CANCELLED'])
+// Polls the status endpoint on a fixed interval while the Execution is
+// still in flight and stops as soon as a non-polling status is observed or
+// the caller calls stop() (component unmount). No WebSocket/SSE -- plain
+// interval polling, matching the rest of this app's style.
+export function trackExecutionStatus(client: PlatformApiClient, input: { executionId: string; correlationId: string }, options: PollOptions = {}): PollController {
+  let cancelled = false
+  const wait = options.wait ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
+  const intervalMs = options.intervalMs ?? 2_500
 
-export async function startAndTrackExecution(client: PlatformApiClient, input: {
-  taskId: string; taskRevision: number; correlationId: string; idempotencyKey: string
-}, options: Options = {}): Promise<ExecutionTrackingState> {
-  const publish = options.onState ?? (() => {})
-  let state: ExecutionTrackingState = { executionId: null, status: 'STARTING_EXECUTION', error: null }
-  publish(state)
-  try {
-    let execution: ExecutionResponse = await client.startExecution(input.taskId, input.taskRevision, input.idempotencyKey, input.correlationId)
-    state = { executionId: execution.executionId, status: execution.status, error: null }; publish(state)
-    const maxPolls = options.maxPolls ?? 20
-    const wait = options.wait ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)))
-    for (let poll = 0; !TERMINAL_FOR_MVP.has(execution.status) && poll < maxPolls; poll += 1) {
-      await wait(options.intervalMs ?? 2_000)
-      execution = await client.getExecution(execution.executionId, input.correlationId)
-      state = { executionId: execution.executionId, status: execution.status, error: null }; publish(state)
+  const whenDone = (async () => {
+    while (!cancelled) {
+      await wait(intervalMs)
+      if (cancelled) return
+      let status: ExecutionStatusResponse
+      try {
+        status = await client.getExecutionStatus(input.executionId, input.correlationId)
+      } catch (error) {
+        if (!cancelled) options.onError?.(error)
+        return
+      }
+      if (cancelled) return
+      options.onState?.(status)
+      if (!EXECUTION_POLLING_STATUSES.has(status.status)) return
     }
-    return state
-  } catch (error) {
-    state = { ...state, status: 'FAILED', error }; publish(state); return state
+  })()
+
+  return { stop: () => { cancelled = true }, whenDone }
+}
+
+export type SingleFlightGuard = { busy: boolean }
+
+// Blocks a concurrent duplicate call while one is already in flight --
+// the double-click / browser-retry protection shared by "start analysis"
+// and "retry analysis". The guard object is owned by the caller (one per
+// user intent) so start and retry never share a lock.
+export async function runGuarded<T>(guard: SingleFlightGuard, action: () => Promise<T>): Promise<T | null> {
+  if (guard.busy) return null
+  guard.busy = true
+  try {
+    return await action()
+  } finally {
+    guard.busy = false
   }
 }

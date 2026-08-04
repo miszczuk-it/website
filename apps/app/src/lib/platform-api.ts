@@ -1,5 +1,5 @@
 import { PlatformApiError } from './safe-error.js'
-import type { ExecutionResponse, ProjectResponse, SessionResponse, TaskResponse } from '../types.js'
+import type { ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionResponse, TaskResponse } from '../types.js'
 
 type FetchLike = typeof fetch
 
@@ -11,6 +11,8 @@ export type PlatformApiClient = {
   markTaskReady(taskId: string, expectedRevision: number, correlationId: string): Promise<TaskResponse>
   startExecution(taskId: string, expectedTaskRevision: number, idempotencyKey: string, correlationId: string): Promise<ExecutionResponse>
   getExecution(executionId: string, correlationId: string): Promise<ExecutionResponse>
+  getExecutionStatus(executionId: string, correlationId: string): Promise<ExecutionStatusResponse>
+  retryExecution(executionId: string, expectedRevision: number, reason: string, idempotencyKey: string, correlationId: string): Promise<ExecutionResponse>
 }
 
 type ClientOptions = { fetchImpl?: FetchLike; timeoutMs?: number; createId?: () => string }
@@ -27,11 +29,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function assertResponse(value: unknown, kind: 'project' | 'session' | 'task' | 'execution') {
-  if (!isRecord(value) || value.contractVersion !== '1.0' || !Number.isInteger(value.revision)) {
-    throw new PlatformApiError('INVALID_RESPONSE')
+function assertResponse(value: unknown, kind: 'project' | 'session' | 'task' | 'execution' | 'executionStatus') {
+  if (!isRecord(value) || value.contractVersion !== '1.0') throw new PlatformApiError('INVALID_RESPONSE')
+  if (kind === 'executionStatus') {
+    if (typeof value.executionId !== 'string' || typeof value.status !== 'string'
+      || typeof value.retryAllowed !== 'boolean' || typeof value.reconcileRequired !== 'boolean'
+      || typeof value.updatedAt !== 'string') {
+      throw new PlatformApiError('INVALID_RESPONSE')
+    }
+    return value
   }
-  if (typeof value[`${kind}Id`] !== 'string' || typeof value.status !== 'string') {
+  if (!Number.isInteger(value.revision) || typeof value[`${kind}Id`] !== 'string' || typeof value.status !== 'string') {
     throw new PlatformApiError('INVALID_RESPONSE')
   }
   return value
@@ -43,7 +51,7 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
   const timeoutMs = options.timeoutMs ?? 10_000
   const createId = options.createId ?? (() => crypto.randomUUID())
 
-  async function call<T>(method: 'GET' | 'POST', path: string, body: object | null, correlationId: string, kind: 'project' | 'session' | 'task' | 'execution'): Promise<T> {
+  async function call<T>(method: 'GET' | 'POST', path: string, body: object | null, correlationId: string, kind: 'project' | 'session' | 'task' | 'execution' | 'executionStatus'): Promise<T> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
@@ -82,5 +90,9 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
       contractVersion: '1.0', idempotencyKey, expectedTaskRevision,
     }, correlationId, 'execution'),
     getExecution: (executionId, correlationId) => call('GET', `/executions/${executionId}`, null, correlationId, 'execution'),
+    getExecutionStatus: (executionId, correlationId) => call('GET', `/executions/${executionId}/status`, null, correlationId, 'executionStatus'),
+    retryExecution: (executionId, expectedRevision, reason, idempotencyKey, correlationId) => call('POST', `/executions/${executionId}/retry`, {
+      contractVersion: '1.0', expectedRevision, reason, idempotencyKey,
+    }, correlationId, 'execution'),
   }
 }

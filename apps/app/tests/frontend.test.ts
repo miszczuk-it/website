@@ -3,18 +3,28 @@ import test from 'node:test'
 import fs from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { AnalysisWorkspace } from '../src/components/AnalysisWorkspace.js'
+import { AnalysisWorkspace, ExecutionStatusPanel } from '../src/components/AnalysisWorkspace.js'
 import { createFlowState, runMvpFlow } from '../src/lib/mvp-flow.js'
-import { startAndTrackExecution } from '../src/lib/execution-flow.js'
+import { runGuarded, trackExecutionStatus, type SingleFlightGuard } from '../src/lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../src/lib/platform-api.js'
 import { PlatformApiError, toSafeUiError } from '../src/lib/safe-error.js'
 import { validateAnalysisForm } from '../src/lib/validation.js'
+import type { ExecutionStatusResponse } from '../src/types.js'
 
 const FORM = { projectName: 'MVP', goal: 'Zweryfikuj problem', taskDescription: 'Przygotuj analizę' }
 const PROJECT_ID = '00000000-0000-4000-8000-000000000001'
 const SESSION_ID = '00000000-0000-4000-8000-000000000002'
 const TASK_ID = '00000000-0000-4000-8000-000000000003'
 const EXECUTION_ID = '00000000-0000-4000-8000-000000000004'
+
+const BASE_EXECUTION_STATUS: ExecutionStatusResponse = {
+  contractVersion: '1.0', executionId: EXECUTION_ID, status: 'WAITING_FOR_LLM_GATEWAY',
+  attemptId: null, attemptNumber: null, attemptStatus: null, providerRequestId: null,
+  provider: null, model: null, workflowExecutionId: null, inputTokens: null, outputTokens: null,
+  cachedInputTokens: null, totalTokens: null, actualCost: null, currency: null,
+  retryAllowed: false, reconcileRequired: false, safeErrorCode: null, safeErrorMessage: null,
+  updatedAt: '2026-01-01T00:00:00.000Z',
+}
 
 function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformApiClient {
   return {
@@ -25,6 +35,8 @@ function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformA
     markTaskReady: async () => ({ contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, status: 'READY', revision: 1 }),
     startExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }),
     getExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }),
+    getExecutionStatus: async () => BASE_EXECUTION_STATUS,
+    retryExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 6 }),
     ...overrides,
   }
 }
@@ -171,27 +183,127 @@ test('Execution client uses canonical endpoints and required start contract', as
   assert.ok(calls.every((call) => call.correlationId === 'correlation-execution'))
 })
 
-test('Execution tracking presents BUILDING_CONTEXT and polls to WAITING_FOR_LLM_GATEWAY without duplicate start', async () => {
-  let starts = 0; let reads = 0; const statuses: string[] = []
-  const client = successfulClient({
-    startExecution: async () => { starts += 1; return { contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID,
-      correlationId: 'correlation', idempotencyKey: 'idem-2', status: 'BUILDING_CONTEXT', revision: 1 } },
-    getExecution: async () => { reads += 1; return { contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID,
-      correlationId: 'correlation', idempotencyKey: 'idem-2', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 } },
-  })
-  const result = await startAndTrackExecution(client, { taskId: TASK_ID, taskRevision: 1, correlationId: 'correlation', idempotencyKey: 'idem-2' },
-    { intervalMs: 0, wait: async () => {}, onState: (state) => statuses.push(state.status) })
-  assert.deepEqual(statuses, ['STARTING_EXECUTION', 'BUILDING_CONTEXT', 'WAITING_FOR_LLM_GATEWAY'])
-  assert.equal(result.status, 'WAITING_FOR_LLM_GATEWAY'); assert.equal(starts, 1); assert.equal(reads, 1)
+test('runGuarded blocks a concurrent duplicate call (start analysis double-click protection)', async () => {
+  let calls = 0
+  const guard: SingleFlightGuard = { busy: false }
+  const action = async () => { calls += 1; await new Promise((resolve) => setTimeout(resolve, 5)); return 'started' }
+  const [first, second] = await Promise.all([runGuarded(guard, action), runGuarded(guard, action)])
+  assert.equal(calls, 1)
+  assert.equal(first, 'started')
+  assert.equal(second, null)
+  assert.equal(guard.busy, false)
 })
 
-test('Execution tracking stops safely on partial failure and retains executionId', async () => {
+test('runGuarded ensures a retry action reaches the API exactly once even if invoked twice', async () => {
+  let retryCalls = 0
+  const guard: SingleFlightGuard = { busy: false }
+  const retry = async () => { retryCalls += 1; return 'retried' }
+  await Promise.all([runGuarded(guard, retry), runGuarded(guard, retry)])
+  assert.equal(retryCalls, 1)
+})
+
+test('polling continues through WAITING_FOR_LLM_GATEWAY and RUNNING, then stops at LLM_RESULT_READY', async () => {
+  const sequence = ['WAITING_FOR_LLM_GATEWAY', 'RUNNING', 'RUNNING', 'LLM_RESULT_READY'] as const
+  let index = 0; let calls = 0
+  const observed: string[] = []
   const client = successfulClient({
-    startExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID,
-      correlationId: 'correlation', idempotencyKey: 'idem-3', status: 'BUILDING_CONTEXT', revision: 1 }),
-    getExecution: async () => { throw new PlatformApiError('SERVICE_UNAVAILABLE', 'correlation', 503) },
+    getExecutionStatus: async () => { calls += 1; return { ...BASE_EXECUTION_STATUS, status: sequence[index++] } },
+    retryExecution: async () => { throw new Error('must not be called automatically') },
   })
-  const result = await startAndTrackExecution(client, { taskId: TASK_ID, taskRevision: 1, correlationId: 'correlation', idempotencyKey: 'idem-3' },
-    { intervalMs: 0, wait: async () => {} })
-  assert.equal(result.status, 'FAILED'); assert.equal(result.executionId, EXECUTION_ID)
+  const controller = trackExecutionStatus(client, { executionId: EXECUTION_ID, correlationId: 'c' },
+    { wait: async () => {}, onState: (status) => observed.push(status.status) })
+  await controller.whenDone
+  assert.deepEqual(observed, sequence)
+  assert.equal(calls, sequence.length, 'polling stops immediately once a terminal status is observed')
+})
+
+test('polling stops for FAILED_RETRYABLE, FAILED_FINAL and UNKNOWN without ever retrying automatically', async () => {
+  for (const terminal of ['FAILED_RETRYABLE', 'FAILED_FINAL', 'UNKNOWN'] as const) {
+    let calls = 0
+    const client = successfulClient({
+      getExecutionStatus: async () => { calls += 1; return { ...BASE_EXECUTION_STATUS, status: terminal } },
+      retryExecution: async () => { throw new Error('must not be called automatically') },
+    })
+    const controller = trackExecutionStatus(client, { executionId: EXECUTION_ID, correlationId: 'c' }, { wait: async () => {} })
+    await controller.whenDone
+    assert.equal(calls, 1, `${terminal} must stop polling after the first observation`)
+  }
+})
+
+test('stop() ends polling immediately even mid-flight (simulates component unmount)', async () => {
+  let calls = 0
+  const client = successfulClient({ getExecutionStatus: async () => { calls += 1; return { ...BASE_EXECUTION_STATUS, status: 'RUNNING' } } })
+  const controller = trackExecutionStatus(client, { executionId: EXECUTION_ID, correlationId: 'c' },
+    { wait: async () => {}, onState: () => controller.stop() })
+  await controller.whenDone
+  const callsWhenStopped = calls
+  assert.equal(callsWhenStopped, 1)
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(calls, callsWhenStopped, 'no further polling after stop()')
+})
+
+test('ExecutionStatusPanel presents model, provider, tokens and cost', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: { ...BASE_EXECUTION_STATUS, status: 'LLM_RESULT_READY', model: 'gpt-5.6-luna', provider: 'openai',
+      inputTokens: 120, outputTokens: 340, totalTokens: 460, actualCost: 0.00042, currency: 'USD', attemptStatus: 'COMPLETED', attemptNumber: 1 },
+    retrying: false, onRetry: () => {},
+  }))
+  for (const value of ['gpt-5.6-luna', 'openai', '120', '340', '460', '0.00042', 'USD', 'COMPLETED']) assert.ok(html.includes(value), value)
+  assert.ok(html.includes('Wynik analizy jest gotowy.'))
+})
+
+test('ExecutionStatusPanel presents missing usage as em-dash, not zero, and omits cached tokens when absent', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: BASE_EXECUTION_STATUS, retrying: false, onRetry: () => {},
+  }))
+  assert.equal(html.includes('>0<'), false)
+  assert.ok(html.includes('—'))
+  assert.equal(html.includes('Tokeny wejściowe z cache'), false)
+})
+
+test('ExecutionStatusPanel shows cached tokens when present', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: { ...BASE_EXECUTION_STATUS, cachedInputTokens: 64 }, retrying: false, onRetry: () => {},
+  }))
+  assert.ok(html.includes('Tokeny wejściowe z cache'))
+  assert.ok(html.includes('64'))
+})
+
+test('ExecutionStatusPanel shows a retry button only when retryAllowed is true (FAILED_RETRYABLE)', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: { ...BASE_EXECUTION_STATUS, status: 'FAILED_RETRYABLE', retryAllowed: true }, retrying: false, onRetry: () => {},
+  }))
+  assert.ok(html.includes('Ponów analizę'))
+  assert.ok(html.includes('Analiza nie powiodła się. Można ją ponowić.'))
+})
+
+test('ExecutionStatusPanel hides retry for FAILED_FINAL and shows a safe error message', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: { ...BASE_EXECUTION_STATUS, status: 'FAILED_FINAL', retryAllowed: false, safeErrorCode: 'PROVIDER_ERROR', safeErrorMessage: 'Bezpieczny komunikat błędu.' },
+    retrying: false, onRetry: () => {},
+  }))
+  assert.equal(html.includes('Ponów analizę'), false)
+  assert.ok(html.includes('Bezpieczny komunikat błędu.'))
+})
+
+test('ExecutionStatusPanel hides retry for UNKNOWN and never renders raw technical identifiers', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: { ...BASE_EXECUTION_STATUS, status: 'UNKNOWN', retryAllowed: false,
+      providerRequestId: 'pr-secret-id', workflowExecutionId: 'wf-42' },
+    retrying: false, onRetry: () => {},
+  }))
+  assert.equal(html.includes('Ponów analizę'), false)
+  assert.ok(html.includes('Stan analizy wymaga weryfikacji.'))
+  assert.equal(html.includes('pr-secret-id'), false)
+  assert.equal(html.includes('wf-42'), false)
+})
+
+test('ExecutionStatusPanel never renders a raw error response shape (no stack, no response body keys)', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: { ...BASE_EXECUTION_STATUS, status: 'FAILED_FINAL', safeErrorMessage: 'Bezpieczny komunikat błędu.' },
+    retrying: false, onRetry: () => {},
+  }))
+  for (const forbidden of ['stack', 'Error:', 'SELECT ', 'postgres', 'HMAC', 'x-gateway-signature']) {
+    assert.equal(html.toLowerCase().includes(forbidden.toLowerCase()), false, forbidden)
+  }
 })
