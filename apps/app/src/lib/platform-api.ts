@@ -1,5 +1,8 @@
 import { PlatformApiError } from './safe-error.js'
-import type { ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionResponse, TaskResponse } from '../types.js'
+import type {
+  ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
+  ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionResponse, TaskResponse,
+} from '../types.js'
 
 type FetchLike = typeof fetch
 
@@ -13,6 +16,13 @@ export type PlatformApiClient = {
   getExecution(executionId: string, correlationId: string): Promise<ExecutionResponse>
   getExecutionStatus(executionId: string, correlationId: string): Promise<ExecutionStatusResponse>
   retryExecution(executionId: string, expectedRevision: number, reason: string, idempotencyKey: string, correlationId: string): Promise<ExecutionResponse>
+  createArtifactFromExecution(executionId: string, artifactType: string, title: string, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
+  getArtifact(artifactId: string, correlationId: string): Promise<ArtifactResponse>
+  listArtifactVersions(artifactId: string, correlationId: string): Promise<ArtifactVersionResponse[]>
+  submitArtifactForReview(artifactId: string, expectedRevision: number, artifactVersionId: string, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
+  createArtifactVersion(artifactId: string, expectedArtifactRevision: number, contentSchemaVersion: string, content: ArtifactNewVersionContent, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
+  createArtifactReviewDecision(artifactId: string, artifactVersionId: string, decisionType: ArtifactDecisionType, expectedVersion: number, idempotencyKey: string, correlationId: string, comment?: string): Promise<ArtifactReviewDecisionResponse>
+  listArtifactReviewDecisions(artifactId: string, correlationId: string): Promise<ArtifactReviewDecisionResponse[]>
 }
 
 type ClientOptions = { fetchImpl?: FetchLike; timeoutMs?: number; createId?: () => string }
@@ -45,13 +55,41 @@ function assertResponse(value: unknown, kind: 'project' | 'session' | 'task' | '
   return value
 }
 
+// Artifact response shapes don't fit the `${kind}Id` + revision + status
+// convention above: ArtifactVersion has no `status`/`revision` (it uses
+// `versionNumber` and is immutable), and a decision has neither -- each
+// gets its own minimal structural check instead of stretching assertResponse.
+function assertArtifact(value: unknown): ArtifactResponse {
+  if (!isRecord(value) || value.contractVersion !== '1.0' || typeof value.artifactId !== 'string'
+    || typeof value.status !== 'string' || !Number.isInteger(value.revision)) {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as ArtifactResponse
+}
+
+function assertArtifactVersion(value: unknown): ArtifactVersionResponse {
+  if (!isRecord(value) || value.contractVersion !== '1.0' || typeof value.artifactVersionId !== 'string'
+    || !Number.isInteger(value.versionNumber) || (typeof value.contentJson !== 'object' && typeof value.contentText !== 'string')) {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as ArtifactVersionResponse
+}
+
+function assertArtifactDecision(value: unknown): ArtifactReviewDecisionResponse {
+  if (!isRecord(value) || value.contractVersion !== '1.0' || typeof value.decisionId !== 'string'
+    || typeof value.decisionType !== 'string' || typeof value.idempotencyKey !== 'string') {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as ArtifactReviewDecisionResponse
+}
+
 export function createPlatformApiClient(baseUrl: string, options: ClientOptions = {}): PlatformApiClient {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
   const fetchImpl = options.fetchImpl ?? fetch
   const timeoutMs = options.timeoutMs ?? 10_000
   const createId = options.createId ?? (() => crypto.randomUUID())
 
-  async function call<T>(method: 'GET' | 'POST', path: string, body: object | null, correlationId: string, kind: 'project' | 'session' | 'task' | 'execution' | 'executionStatus'): Promise<T> {
+  async function fetchJson(method: 'GET' | 'POST', path: string, body: object | null, correlationId: string): Promise<unknown> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
@@ -72,12 +110,26 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
         } catch { /* Ignore untrusted technical response details. */ }
         throw new PlatformApiError(errorCode, correlationId, response.status, currentRevision)
       }
-      return assertResponse(await response.json(), kind) as T
+      return await response.json()
     } catch (error) {
       if (error instanceof PlatformApiError) throw error
       if (error instanceof DOMException && error.name === 'AbortError') throw new PlatformApiError('TIMEOUT', correlationId)
       throw new PlatformApiError('NETWORK_ERROR', correlationId)
     } finally { clearTimeout(timeout) }
+  }
+
+  async function call<T>(method: 'GET' | 'POST', path: string, body: object | null, correlationId: string, kind: 'project' | 'session' | 'task' | 'execution' | 'executionStatus'): Promise<T> {
+    return assertResponse(await fetchJson(method, path, body, correlationId), kind) as T
+  }
+
+  async function callValidated<T>(method: 'GET' | 'POST', path: string, body: object | null, correlationId: string, validate: (value: unknown) => T): Promise<T> {
+    return validate(await fetchJson(method, path, body, correlationId))
+  }
+
+  async function callList<T>(path: string, correlationId: string, validate: (value: unknown) => T): Promise<T[]> {
+    const value = await fetchJson('GET', path, null, correlationId)
+    if (!Array.isArray(value)) throw new PlatformApiError('INVALID_RESPONSE')
+    return value.map(validate)
   }
 
   return {
@@ -94,5 +146,20 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
     retryExecution: (executionId, expectedRevision, reason, idempotencyKey, correlationId) => call('POST', `/executions/${executionId}/retry`, {
       contractVersion: '1.0', expectedRevision, reason, idempotencyKey,
     }, correlationId, 'execution'),
+    createArtifactFromExecution: (executionId, artifactType, title, idempotencyKey, correlationId) => callValidated('POST', `/executions/${executionId}/artifacts`, {
+      contractVersion: '1.0', artifactType, title, idempotencyKey,
+    }, correlationId, assertArtifact),
+    getArtifact: (artifactId, correlationId) => callValidated('GET', `/artifacts/${artifactId}`, null, correlationId, assertArtifact),
+    listArtifactVersions: (artifactId, correlationId) => callList(`/artifacts/${artifactId}/versions`, correlationId, assertArtifactVersion),
+    submitArtifactForReview: (artifactId, expectedRevision, artifactVersionId, idempotencyKey, correlationId) => callValidated('POST', `/artifacts/${artifactId}/submit-for-review`, {
+      contractVersion: '1.0', expectedRevision, artifactVersionId, idempotencyKey,
+    }, correlationId, assertArtifact),
+    createArtifactVersion: (artifactId, expectedArtifactRevision, contentSchemaVersion, content, idempotencyKey, correlationId) => callValidated('POST', `/artifacts/${artifactId}/versions`, {
+      contractVersion: '1.0', idempotencyKey, expectedArtifactRevision, contentSchemaVersion, ...content,
+    }, correlationId, assertArtifact),
+    createArtifactReviewDecision: (artifactId, artifactVersionId, decisionType, expectedVersion, idempotencyKey, correlationId, comment) => callValidated('POST', `/artifacts/${artifactId}/decisions`, {
+      contractVersion: '1.0', artifactVersionId, decisionType, idempotencyKey, expectedVersion, ...(comment ? { comment } : {}),
+    }, correlationId, assertArtifactDecision),
+    listArtifactReviewDecisions: (artifactId, correlationId) => callList(`/artifacts/${artifactId}/decisions`, correlationId, assertArtifactDecision),
   }
 }

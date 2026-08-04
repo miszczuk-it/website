@@ -75,3 +75,58 @@ export type ExecutionStatusResponse = {
   safeErrorMessage: string | null
   updatedAt: string
 }
+
+// Artifact / Human-in-the-Loop review types (MVP-IMPL-005D), mirroring
+// contracts/mvp/artifact-*.schema.json in ai-platform 1:1.
+export type ArtifactStatus = 'DRAFT' | 'READY_FOR_REVIEW' | 'APPROVED' | 'REJECTED' | 'REVISION_REQUESTED' | 'ARCHIVED'
+export type ArtifactDecisionType = 'APPROVE' | 'REJECT' | 'REQUEST_REVISION' | 'COMMENT_ONLY'
+export type ArtifactActorType = 'HUMAN' | 'SYSTEM'
+
+export type ArtifactResponse = {
+  contractVersion: '1.0'
+  artifactId: string
+  projectId: string
+  sessionId: string
+  taskId: string
+  executionId: string
+  artifactType: string
+  title: string
+  status: ArtifactStatus
+  currentVersionId: string | null
+  revision: number
+  createdAt: string
+  updatedAt: string
+}
+
+// contentJson XOR contentText per artifact-version-response.schema.json anyOf.
+export type ArtifactVersionResponse = {
+  contractVersion: '1.0'
+  artifactVersionId: string
+  artifactId: string
+  versionNumber: number
+  sourceAttemptId: string | null
+  contentJson?: Record<string, unknown>
+  contentText?: string
+  contentSchemaVersion: string
+  checksum: string
+  createdByType: 'SYSTEM' | 'HUMAN'
+  createdByReference: string
+  createdAt: string
+}
+
+// Request-shaped, not response-shaped: exactly one of the two content
+// forms, matching artifact-version-create.schema.json's anyOf.
+export type ArtifactNewVersionContent = { contentText: string } | { contentJson: Record<string, unknown> }
+
+export type ArtifactReviewDecisionResponse = {
+  contractVersion: '1.0'
+  decisionId: string
+  artifactId: string
+  artifactVersionId: string
+  decisionType: ArtifactDecisionType
+  comment: string | null
+  actorType: ArtifactActorType
+  actorReference: string
+  idempotencyKey: string
+  createdAt: string
+}

@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createFlowState, nextIncompleteStep, runMvpFlow } from '../lib/mvp-flow.js'
+import { createArtifactVersionAndRefresh } from '../lib/artifact-flow.js'
 import { EXECUTION_POLLING_STATUSES, runGuarded, trackExecutionStatus, type PollController, type SingleFlightGuard } from '../lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../lib/platform-api.js'
 import { PlatformApiError, toSafeUiError, type SafeUiError } from '../lib/safe-error.js'
 import { validateAnalysisForm, type FormErrors } from '../lib/validation.js'
-import type { AnalysisFormValues, ExecutionResponse, ExecutionStatus, ExecutionStatusResponse, FlowStep, MvpFlowState } from '../types.js'
+import { ArtifactReviewPanel } from './ArtifactReviewPanel.js'
+import type {
+  AnalysisFormValues, ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactVersionResponse,
+  ExecutionResponse, ExecutionStatus, ExecutionStatusResponse, FlowStep, MvpFlowState,
+} from '../types.js'
 
 const EMPTY_FORM: AnalysisFormValues = { projectName: '', goal: '', taskDescription: '' }
 const BUSY_STEPS: FlowStep[] = ['VALIDATING', 'CREATING_PROJECT', 'CREATING_SESSION', 'STARTING_SESSION', 'CREATING_TASK', 'MARKING_TASK_READY']
@@ -80,10 +85,23 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const [executionStatus, setExecutionStatus] = useState<ExecutionStatusResponse | null>(null)
   const [executing, setExecuting] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const [artifact, setArtifact] = useState<ArtifactResponse | null>(null)
+  const [artifactVersion, setArtifactVersion] = useState<ArtifactVersionResponse | null>(null)
+  const [creatingArtifact, setCreatingArtifact] = useState(false)
+  const [submittingForReview, setSubmittingForReview] = useState(false)
+  const [deciding, setDeciding] = useState(false)
+  const [creatingVersion, setCreatingVersion] = useState(false)
+  const [versionNotice, setVersionNotice] = useState<string | null>(null)
+  const [artifactSafeError, setArtifactSafeError] = useState<SafeUiError | null>(null)
   const submitting = useRef(false)
   const startGuard = useRef<SingleFlightGuard>({ busy: false })
   const retryGuard = useRef<SingleFlightGuard>({ busy: false })
+  const createArtifactGuard = useRef<SingleFlightGuard>({ busy: false })
+  const submitReviewGuard = useRef<SingleFlightGuard>({ busy: false })
+  const decisionGuard = useRef<SingleFlightGuard>({ busy: false })
+  const createVersionGuard = useRef<SingleFlightGuard>({ busy: false })
   const executionIdempotencyKey = useRef<string | null>(null)
+  const artifactIdempotencyKey = useRef<string | null>(null)
   const pollController = useRef<PollController | null>(null)
   const projectNameInput = useRef<HTMLInputElement>(null)
   const goalInput = useRef<HTMLTextAreaElement>(null)
@@ -195,6 +213,97 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
     }
   }
 
+  async function createArtifactForReview() {
+    if (creatingArtifact || artifact || !execution || executionStatus?.status !== 'LLM_RESULT_READY') return
+    setCreatingArtifact(true); setArtifactSafeError(null); setVersionNotice(null)
+    artifactIdempotencyKey.current ??= crypto.randomUUID()
+    const correlationId = flow?.correlationId ?? execution.correlationId
+    try {
+      const created = await runGuarded(createArtifactGuard.current, () => client.createArtifactFromExecution(
+        execution.executionId, 'BUSINESS_ANALYSIS_RESULT', 'Wynik analizy Business Analyst', artifactIdempotencyKey.current!, correlationId,
+      ))
+      if (created) {
+        setArtifact(created)
+        if (created.currentVersionId) {
+          const versions = await client.listArtifactVersions(created.artifactId, correlationId)
+          setArtifactVersion(versions.find((version) => version.artifactVersionId === created.currentVersionId) ?? null)
+        }
+      }
+    } catch (error) {
+      setArtifactSafeError(toSafeUiError(error))
+    } finally {
+      setCreatingArtifact(false)
+    }
+  }
+
+  async function submitArtifactForReview() {
+    if (submittingForReview || !artifact || artifact.status !== 'DRAFT' || !artifact.currentVersionId) return
+    setSubmittingForReview(true); setArtifactSafeError(null); setVersionNotice(null)
+    const correlationId = flow?.correlationId ?? execution?.correlationId ?? artifact.artifactId
+    try {
+      const idempotencyKey = crypto.randomUUID()
+      const updated = await runGuarded(submitReviewGuard.current, () => client.submitArtifactForReview(
+        artifact.artifactId, artifact.revision, artifact.currentVersionId!, idempotencyKey, correlationId,
+      ))
+      if (updated) setArtifact(updated)
+    } catch (error) {
+      if (error instanceof PlatformApiError && error.code === 'CONFLICT') {
+        setArtifactSafeError({ message: 'Stan Artifact zmienił się w międzyczasie. Status został odświeżony.' })
+        try { setArtifact(await client.getArtifact(artifact.artifactId, correlationId)) } catch { /* best-effort refresh */ }
+      } else {
+        setArtifactSafeError(toSafeUiError(error))
+      }
+    } finally {
+      setSubmittingForReview(false)
+    }
+  }
+
+  async function decideOnArtifact(decisionType: ArtifactDecisionType, comment: string) {
+    if (deciding || !artifact || !artifact.currentVersionId) return
+    setDeciding(true); setArtifactSafeError(null); setVersionNotice(null)
+    const correlationId = flow?.correlationId ?? execution?.correlationId ?? artifact.artifactId
+    try {
+      const idempotencyKey = crypto.randomUUID()
+      const decision = await runGuarded(decisionGuard.current, () => client.createArtifactReviewDecision(
+        artifact.artifactId, artifact.currentVersionId!, decisionType, artifact.revision, idempotencyKey, correlationId, comment || undefined,
+      ))
+      if (decision) setArtifact(await client.getArtifact(artifact.artifactId, correlationId))
+    } catch (error) {
+      setArtifactSafeError(toSafeUiError(error))
+      try { setArtifact(await client.getArtifact(artifact.artifactId, correlationId)) } catch { /* best-effort refresh */ }
+    } finally {
+      setDeciding(false)
+    }
+  }
+
+  // Creates a brand new ArtifactVersion while the Artifact is
+  // REVISION_REQUESTED (task binding decision: manual authoring is only
+  // reachable from this status, never a rich editor). The multi-step
+  // orchestration (create -> refresh, or conflict -> read-only refresh,
+  // never an automatic replay of the write) lives in createArtifactVersionAndRefresh
+  // so it stays unit-testable without a DOM harness; this handler only
+  // wires guard/state around it, matching the runMvpFlow/submit() split above.
+  async function createNewArtifactVersion(content: ArtifactNewVersionContent) {
+    if (creatingVersion || !artifact || artifact.status !== 'REVISION_REQUESTED' || !artifactVersion) return
+    setCreatingVersion(true); setArtifactSafeError(null); setVersionNotice(null)
+    const correlationId = flow?.correlationId ?? execution?.correlationId ?? artifact.artifactId
+    const idempotencyKey = crypto.randomUUID()
+    try {
+      const result = await runGuarded(createVersionGuard.current, () => createArtifactVersionAndRefresh(
+        client, artifact, artifactVersion, content, idempotencyKey, correlationId,
+      ))
+      if (result?.outcome === 'CREATED') {
+        setArtifact(result.artifact); setArtifactVersion(result.version); setVersionNotice(result.notice)
+      } else if (result?.outcome === 'CONFLICT') {
+        setArtifact(result.artifact); setArtifactVersion(result.version); setArtifactSafeError({ message: result.message })
+      } else if (result?.outcome === 'ERROR') {
+        setArtifactSafeError(toSafeUiError(result.error))
+      }
+    } finally {
+      setCreatingVersion(false)
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="hero">
@@ -264,6 +373,32 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
           </>
         )}
       </section>
+
+      {executionStatus?.status === 'LLM_RESULT_READY' && (
+        <section className="panel" aria-labelledby="artifact-review-title">
+          <h2 id="artifact-review-title">Przegląd wyniku (Human in the Loop)</h2>
+          {!artifact && (
+            <button className="primary" type="button" onClick={createArtifactForReview} disabled={creatingArtifact}>
+              {creatingArtifact ? 'Tworzenie…' : 'Utwórz Artifact do przeglądu'}
+            </button>
+          )}
+          {artifact && (
+            <ArtifactReviewPanel
+              artifact={artifact}
+              version={artifactVersion}
+              submittingForReview={submittingForReview}
+              deciding={deciding}
+              creatingVersion={creatingVersion}
+              safeErrorMessage={artifactSafeError?.message ?? null}
+              versionNotice={versionNotice}
+              onSubmitForReview={submitArtifactForReview}
+              onDecide={decideOnArtifact}
+              onCreateVersion={createNewArtifactVersion}
+            />
+          )}
+          {!artifact && artifactSafeError && <p role="alert">{artifactSafeError.message}</p>}
+        </section>
+      )}
     </main>
   )
 }
