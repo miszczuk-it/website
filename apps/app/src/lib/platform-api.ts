@@ -1,6 +1,6 @@
 import { PlatformApiError } from './safe-error.js'
 import type {
-  ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
+  ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionEnvelope, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
   ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionResponse, TaskResponse,
 } from '../types.js'
 
@@ -21,7 +21,7 @@ export type PlatformApiClient = {
   listArtifactVersions(artifactId: string, correlationId: string): Promise<ArtifactVersionResponse[]>
   submitArtifactForReview(artifactId: string, expectedRevision: number, artifactVersionId: string, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
   createArtifactVersion(artifactId: string, expectedArtifactRevision: number, contentSchemaVersion: string, content: ArtifactNewVersionContent, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
-  createArtifactReviewDecision(artifactId: string, artifactVersionId: string, decisionType: ArtifactDecisionType, expectedVersion: number, idempotencyKey: string, correlationId: string, comment?: string): Promise<ArtifactReviewDecisionResponse>
+  createArtifactReviewDecision(artifactId: string, artifactVersionId: string, decisionType: ArtifactDecisionType, expectedVersion: number, idempotencyKey: string, correlationId: string, comment?: string): Promise<ArtifactReviewDecisionEnvelope>
   listArtifactReviewDecisions(artifactId: string, correlationId: string): Promise<ArtifactReviewDecisionResponse[]>
 }
 
@@ -81,6 +81,18 @@ function assertArtifactDecision(value: unknown): ArtifactReviewDecisionResponse 
     throw new PlatformApiError('INVALID_RESPONSE')
   }
   return value as unknown as ArtifactReviewDecisionResponse
+}
+
+// POST /artifacts/:id/decisions response (MVP-TASK-006): the decision is
+// nested under `reviewDecision` alongside `triggeredExecutionId`, unlike
+// GET /decisions which still returns bare ArtifactReviewDecisionResponse
+// shapes (assertArtifactDecision above, reused here for the nested object).
+function assertArtifactDecisionEnvelope(value: unknown): ArtifactReviewDecisionEnvelope {
+  if (!isRecord(value) || value.contractVersion !== '1.0' || !isRecord(value.reviewDecision)
+    || (value.triggeredExecutionId !== null && typeof value.triggeredExecutionId !== 'string')) {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return { contractVersion: '1.0', reviewDecision: assertArtifactDecision(value.reviewDecision), triggeredExecutionId: value.triggeredExecutionId as string | null }
 }
 
 export function createPlatformApiClient(baseUrl: string, options: ClientOptions = {}): PlatformApiClient {
@@ -159,7 +171,7 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
     }, correlationId, assertArtifact),
     createArtifactReviewDecision: (artifactId, artifactVersionId, decisionType, expectedVersion, idempotencyKey, correlationId, comment) => callValidated('POST', `/artifacts/${artifactId}/decisions`, {
       contractVersion: '1.0', artifactVersionId, decisionType, idempotencyKey, expectedVersion, ...(comment ? { comment } : {}),
-    }, correlationId, assertArtifactDecision),
+    }, correlationId, assertArtifactDecisionEnvelope),
     listArtifactReviewDecisions: (artifactId, correlationId) => callList(`/artifacts/${artifactId}/decisions`, correlationId, assertArtifactDecision),
   }
 }

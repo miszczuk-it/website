@@ -5,13 +5,13 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AnalysisWorkspace, ExecutionStatusPanel } from '../src/components/AnalysisWorkspace.js'
 import { ArtifactReviewPanel } from '../src/components/ArtifactReviewPanel.js'
-import { createArtifactVersionAndRefresh, decideArtifactAndRefresh } from '../src/lib/artifact-flow.js'
+import { createArtifactVersionAndRefresh, decideArtifactAndRefresh, handleRevisionExecutionStatus } from '../src/lib/artifact-flow.js'
 import { createFlowState, runMvpFlow } from '../src/lib/mvp-flow.js'
 import { runGuarded, trackExecutionStatus, type SingleFlightGuard } from '../src/lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../src/lib/platform-api.js'
 import { PlatformApiError, toSafeUiError } from '../src/lib/safe-error.js'
 import { validateAnalysisForm, validateNewVersionContent } from '../src/lib/validation.js'
-import type { ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse, ExecutionStatusResponse } from '../src/types.js'
+import type { ArtifactResponse, ArtifactReviewDecisionEnvelope, ArtifactReviewDecisionResponse, ArtifactVersionResponse, ExecutionStatusResponse } from '../src/types.js'
 
 const FORM = { projectName: 'MVP', goal: 'Zweryfikuj problem', taskDescription: 'Przygotuj analizę' }
 const PROJECT_ID = '00000000-0000-4000-8000-000000000001'
@@ -50,6 +50,16 @@ const BASE_DECISION: ArtifactReviewDecisionResponse = {
   idempotencyKey: 'decision-key', createdAt: '2026-01-01T00:00:00.000Z',
 }
 
+// POST /artifacts/:id/decisions response envelope (MVP-TASK-006): the write
+// itself always comes back wrapped like this, never as a bare decision --
+// that legacy bare shape is exactly what caused the "Odpowiedź Platform API
+// jest niezgodna z kontraktem" regression this fix addresses.
+const BASE_DECISION_ENVELOPE: ArtifactReviewDecisionEnvelope = {
+  contractVersion: '1.0', reviewDecision: BASE_DECISION, triggeredExecutionId: null,
+}
+
+const REVISION_EXECUTION_ID = '00000000-0000-4000-8000-000000000009'
+
 const BASE_EXECUTION_STATUS: ExecutionStatusResponse = {
   contractVersion: '1.0', executionId: EXECUTION_ID, status: 'WAITING_FOR_LLM_GATEWAY',
   attemptId: null, attemptNumber: null, attemptStatus: null, providerRequestId: null,
@@ -74,7 +84,7 @@ function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformA
     getArtifact: async () => BASE_ARTIFACT,
     listArtifactVersions: async () => [BASE_ARTIFACT_VERSION],
     submitArtifactForReview: async () => ({ ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }),
-    createArtifactReviewDecision: async () => BASE_DECISION,
+    createArtifactReviewDecision: async () => BASE_DECISION_ENVELOPE,
     listArtifactReviewDecisions: async () => [BASE_DECISION],
     createArtifactVersion: async () => ({ ...BASE_ARTIFACT, status: 'DRAFT', revision: 4, currentVersionId: NEW_ARTIFACT_VERSION_ID }),
     ...overrides,
@@ -353,7 +363,7 @@ test('Artifact API client uses canonical endpoints for create, submit-for-review
   const fetchImpl: typeof fetch = async (input, init) => {
     calls.push({ method: String(init?.method), url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined })
     if (String(input).endsWith('/versions')) return new Response(JSON.stringify([BASE_ARTIFACT_VERSION]), { status: 200 })
-    if (String(input).endsWith('/decisions')) return new Response(JSON.stringify(BASE_DECISION), { status: 201 })
+    if (String(input).endsWith('/decisions')) return new Response(JSON.stringify(BASE_DECISION_ENVELOPE), { status: 201 })
     if (String(input).endsWith('/submit-for-review')) return new Response(JSON.stringify({ ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }), { status: 200 })
     return new Response(JSON.stringify(BASE_ARTIFACT), { status: 200 })
   }
@@ -362,7 +372,7 @@ test('Artifact API client uses canonical endpoints for create, submit-for-review
   await client.getArtifact(ARTIFACT_ID, 'correlation-artifact')
   const versions = await client.listArtifactVersions(ARTIFACT_ID, 'correlation-artifact')
   await client.submitArtifactForReview(ARTIFACT_ID, 0, ARTIFACT_VERSION_ID, 'idem-submit', 'correlation-artifact')
-  await client.createArtifactReviewDecision(ARTIFACT_ID, ARTIFACT_VERSION_ID, 'APPROVE', 1, 'idem-decision', 'correlation-artifact')
+  const decisionResult = await client.createArtifactReviewDecision(ARTIFACT_ID, ARTIFACT_VERSION_ID, 'APPROVE', 1, 'idem-decision', 'correlation-artifact')
   assert.deepEqual(calls.map(({ method, url }) => ({ method, url })), [
     { method: 'POST', url: `/api/executions/${EXECUTION_ID}/artifacts` },
     { method: 'GET', url: `/api/artifacts/${ARTIFACT_ID}` },
@@ -373,11 +383,52 @@ test('Artifact API client uses canonical endpoints for create, submit-for-review
   assert.deepEqual(versions, [BASE_ARTIFACT_VERSION])
   assert.equal(calls[0].body?.idempotencyKey, 'idem-artifact')
   assert.equal(calls[4].body?.comment, undefined, 'APPROVE must not send a comment field when none is given')
+  assert.deepEqual(decisionResult, BASE_DECISION_ENVELOPE, 'the decisions response is the { reviewDecision, triggeredExecutionId } envelope')
 })
 
 test('Artifact list endpoints reject a non-array response as INVALID_RESPONSE', async () => {
   const client = createPlatformApiClient('/api', { fetchImpl: async () => new Response(JSON.stringify(BASE_ARTIFACT), { status: 200 }) })
   await assert.rejects(client.listArtifactVersions(ARTIFACT_ID, 'correlation-artifact'), (error: PlatformApiError) => error.code === 'INVALID_RESPONSE')
+})
+
+// --- POST /decisions response envelope (MVP-TASK-006 regression fix) ---
+//
+// Root cause of "Odpowiedź Platform API jest niezgodna z kontraktem": the
+// backend now wraps the decision write as { reviewDecision, triggeredExecutionId }
+// (contracts/mvp/artifact-review-decision-response.schema.json in ai-platform),
+// but the client used to validate the bare decision shape directly against
+// the top-level response body. These tests pin both directions: the new
+// envelope must be accepted, and the old bare shape must now be rejected --
+// proving the client no longer silently expects the legacy contract.
+
+test('createArtifactReviewDecision accepts the { reviewDecision, triggeredExecutionId } envelope and exposes triggeredExecutionId', async () => {
+  const envelope: ArtifactReviewDecisionEnvelope = {
+    contractVersion: '1.0',
+    reviewDecision: { ...BASE_DECISION, decisionType: 'REQUEST_REVISION', comment: 'Proszę poprawić sekcję ryzyk.' },
+    triggeredExecutionId: REVISION_EXECUTION_ID,
+  }
+  const client = createPlatformApiClient('/api', { fetchImpl: async () => new Response(JSON.stringify(envelope), { status: 201 }) })
+  const result = await client.createArtifactReviewDecision(ARTIFACT_ID, ARTIFACT_VERSION_ID, 'REQUEST_REVISION', 1, 'idem', 'correlation', 'Proszę poprawić sekcję ryzyk.')
+  assert.equal(result.triggeredExecutionId, REVISION_EXECUTION_ID)
+  assert.equal(result.reviewDecision.decisionType, 'REQUEST_REVISION')
+})
+
+test('createArtifactReviewDecision rejects the legacy bare-decision response shape as INVALID_RESPONSE', async () => {
+  const client = createPlatformApiClient('/api', { fetchImpl: async () => new Response(JSON.stringify(BASE_DECISION), { status: 201 }) })
+  await assert.rejects(
+    client.createArtifactReviewDecision(ARTIFACT_ID, ARTIFACT_VERSION_ID, 'APPROVE', 1, 'idem', 'correlation'),
+    (error: PlatformApiError) => error.code === 'INVALID_RESPONSE',
+  )
+})
+
+test('createArtifactReviewDecision rejects a triggeredExecutionId that is neither a string nor null', async () => {
+  const client = createPlatformApiClient('/api', {
+    fetchImpl: async () => new Response(JSON.stringify({ contractVersion: '1.0', reviewDecision: BASE_DECISION, triggeredExecutionId: 42 }), { status: 201 }),
+  })
+  await assert.rejects(
+    client.createArtifactReviewDecision(ARTIFACT_ID, ARTIFACT_VERSION_ID, 'APPROVE', 1, 'idem', 'correlation'),
+    (error: PlatformApiError) => error.code === 'INVALID_RESPONSE',
+  )
 })
 
 test('ArtifactReviewPanel presents both contentText and contentJson version shapes', () => {
@@ -472,24 +523,46 @@ test('AnalysisWorkspace shows the Artifact review section only once the Executio
 
 const noopPanelProps = { submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {} }
 
-test('1. REVISION_REQUESTED shows the new-version form', () => {
+test('1. REVISION_REQUESTED hides the manual new-version form and shows a generating status instead (MVP-TASK-006: revision is auto-generated)', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: false, versionNotice: null,
-    onCreateVersion: () => {}, ...noopPanelProps,
+    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
+    revisionGenerating: true, revisionError: null, versionNotice: null, ...noopPanelProps,
   }))
-  assert.ok(html.includes('Nowa wersja'))
-  assert.ok(html.includes('Utwórz nową wersję'))
+  assert.equal(html.includes('Utwórz nową wersję'), false, 'the manual create-version button must never render in this flow')
+  assert.equal(html.includes('id="artifact-new-version-text"'), false)
+  assert.equal(html.includes('id="artifact-new-version-json"'), false)
+  assert.ok(html.includes('Trwa generowanie poprawionej wersji'))
 })
 
-test('2. other statuses do not show the new-version form', () => {
+test('2. no status ever shows the removed manual new-version form (button/textareas no longer exist)', () => {
   for (const artifact of [BASE_ARTIFACT, { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 } as ArtifactResponse,
     { ...BASE_ARTIFACT, status: 'APPROVED', revision: 2 } as ArtifactResponse, { ...BASE_ARTIFACT, status: 'REJECTED', revision: 2 } as ArtifactResponse,
-    { ...BASE_ARTIFACT, status: 'ARCHIVED', revision: 5 } as ArtifactResponse]) {
+    REVISION_REQUESTED_ARTIFACT, { ...BASE_ARTIFACT, status: 'ARCHIVED', revision: 5 } as ArtifactResponse]) {
     const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-      artifact, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: false, versionNotice: null, onCreateVersion: () => {}, ...noopPanelProps,
+      artifact, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, versionNotice: null, ...noopPanelProps,
     }))
     assert.equal(html.includes('Utwórz nową wersję'), false, artifact.status)
   }
+})
+
+test('REVISION_REQUESTED shows a safe error message (not the generating status) once the triggered Execution fails, and never auto-resubmits', () => {
+  let calls = 0
+  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
+    revisionGenerating: false, revisionError: 'Generowanie poprawionej wersji nie powiodło się.', versionNotice: null,
+    submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => { calls += 1 },
+  }))
+  assert.ok(html.includes('Generowanie poprawionej wersji nie powiodło się.'))
+  assert.equal(html.includes('Trwa generowanie poprawionej wersji'), false)
+  assert.equal(calls, 0, 'rendering the error must never itself trigger another decision')
+})
+
+test('REVISION_REQUESTED never offers REQUEST_REVISION again while a revision is generating (blocks resubmitting the same feedback)', () => {
+  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
+    revisionGenerating: true, revisionError: null, versionNotice: null, ...noopPanelProps,
+  }))
+  assert.equal(html.includes('Poproś o poprawę'), false)
 })
 
 test('3. empty content_text blocks submission', () => {
@@ -631,31 +704,10 @@ test('12. the historical version stays reachable and unchanged after a new versi
   assert.ok(!requestFields.includes('artifactVersionId'))
 })
 
-test('ArtifactReviewPanel shows a safe validation message and never sends the request when creatingVersion stays false after a client-side JSON error', () => {
-  // ArtifactReviewPanel's own JSON.parse guard runs before onCreateVersion
-  // is ever invoked -- verified at the unit level via the exported form's
-  // early-return in submitNewVersion(); here we confirm the JSON-mode
-  // textarea is rendered instead of the plain-text one when the current
-  // version carries contentJson, matching the "form mode follows current
-  // version" requirement.
-  const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION_JSON], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: false, versionNotice: null,
-    onCreateVersion: () => {}, ...noopPanelProps,
-  }))
-  assert.ok(html.includes('Treść (JSON)'))
-  assert.equal(html.includes('id="artifact-new-version-text"'), false)
-})
-
-test('ArtifactReviewPanel new-version button is disabled while creatingVersion, and shows a success notice after creation', () => {
-  const busyHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: true, versionNotice: null,
-    onCreateVersion: () => {}, ...noopPanelProps,
-  }))
-  assert.match(busyHtml, /Tworzenie…[\s\S]*?disabled=""|disabled=""[\s\S]*?Tworzenie…/)
-
+test('ArtifactReviewPanel shows a success notice when versionNotice is set (generic notice slot, unrelated to any specific form)', () => {
   const noticeHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, creatingVersion: false, versionNotice: 'Nowa wersja została utworzona.',
-    onCreateVersion: () => {}, ...noopPanelProps,
+    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, versionNotice: 'Nowa wersja została utworzona.',
+    ...noopPanelProps,
   }))
   assert.ok(noticeHtml.includes('Nowa wersja została utworzona.'))
 })
@@ -738,7 +790,7 @@ test('decideArtifactAndRefresh: success refreshes Artifact, versions and decisio
   const decidedArtifact: ArtifactResponse = { ...BASE_ARTIFACT, status: 'APPROVED', revision: 2 }
   const newDecision = { ...BASE_DECISION, decisionType: 'APPROVE' as const }
   const client = successfulClient({
-    createArtifactReviewDecision: async () => newDecision,
+    createArtifactReviewDecision: async () => ({ contractVersion: '1.0', reviewDecision: newDecision, triggeredExecutionId: null }),
     getArtifact: async () => { getArtifactCalls += 1; return decidedArtifact },
     listArtifactVersions: async () => { listVersionCalls += 1; return [BASE_ARTIFACT_VERSION] },
     listArtifactReviewDecisions: async () => { listDecisionCalls += 1; return [newDecision] },
@@ -767,4 +819,93 @@ test('decideArtifactAndRefresh: a failed decision still refreshes read-only stat
   assert.ok(result.refreshed)
   assert.equal(result.refreshed?.artifact.status, 'APPROVED')
   assert.deepEqual(result.refreshed?.decisions, [BASE_DECISION])
+})
+
+// --- REQUEST_REVISION auto-generation (MVP-TASK-006 frontend fix) ---
+
+test('decideArtifactAndRefresh: REQUEST_REVISION reads triggeredExecutionId out of the response envelope', async () => {
+  const revisionRequestedArtifact: ArtifactResponse = { ...BASE_ARTIFACT, status: 'REVISION_REQUESTED', revision: 1 }
+  const client = successfulClient({
+    createArtifactReviewDecision: async () => ({
+      contractVersion: '1.0',
+      reviewDecision: { ...BASE_DECISION, decisionType: 'REQUEST_REVISION', comment: 'Proszę dodać ryzyka.' },
+      triggeredExecutionId: REVISION_EXECUTION_ID,
+    }),
+    getArtifact: async () => revisionRequestedArtifact,
+  })
+  const result = await decideArtifactAndRefresh(client, BASE_ARTIFACT, ARTIFACT_VERSION_ID, 'REQUEST_REVISION', 'Proszę dodać ryzyka.', 'idem-decision', 'correlation')
+  assert.equal(result.outcome, 'DECIDED')
+  if (result.outcome !== 'DECIDED') throw new Error('unreachable')
+  assert.equal(result.triggeredExecutionId, REVISION_EXECUTION_ID)
+  assert.equal(result.artifact.status, 'REVISION_REQUESTED')
+})
+
+test('decideArtifactAndRefresh: APPROVE/REJECT/COMMENT_ONLY carry triggeredExecutionId: null (only REQUEST_REVISION ever triggers an Execution)', async () => {
+  const result = await decideArtifactAndRefresh(successfulClient(), BASE_ARTIFACT, ARTIFACT_VERSION_ID, 'APPROVE', '', 'idem-decision', 'correlation')
+  assert.equal(result.outcome, 'DECIDED')
+  if (result.outcome !== 'DECIDED') throw new Error('unreachable')
+  assert.equal(result.triggeredExecutionId, null)
+})
+
+test('handleRevisionExecutionStatus: still in flight (WAITING_FOR_LLM_GATEWAY/RUNNING) returns null and never refreshes the Artifact', async () => {
+  let getArtifactCalls = 0
+  const client = successfulClient({ getArtifact: async () => { getArtifactCalls += 1; return BASE_ARTIFACT } })
+  for (const status of ['WAITING_FOR_LLM_GATEWAY', 'RUNNING'] as const) {
+    const result = await handleRevisionExecutionStatus(client, ARTIFACT_ID, 'correlation', { ...BASE_EXECUTION_STATUS, executionId: REVISION_EXECUTION_ID, status })
+    assert.equal(result, null)
+  }
+  assert.equal(getArtifactCalls, 0, 'no premature refresh while the revision Execution is still running')
+})
+
+test('handleRevisionExecutionStatus: LLM_RESULT_READY refreshes the Artifact, versions and decisions in one snapshot', async () => {
+  const draftWithNewVersion: ArtifactResponse = { ...BASE_ARTIFACT, status: 'DRAFT', currentVersionId: NEW_ARTIFACT_VERSION_ID, revision: 4 }
+  const newVersion = { ...BASE_ARTIFACT_VERSION, artifactVersionId: NEW_ARTIFACT_VERSION_ID, versionNumber: 2, contentText: 'Poprawiona treść wygenerowana automatycznie.' }
+  let getArtifactCalls = 0, listVersionCalls = 0, listDecisionCalls = 0
+  const client = successfulClient({
+    getArtifact: async () => { getArtifactCalls += 1; return draftWithNewVersion },
+    listArtifactVersions: async () => { listVersionCalls += 1; return [BASE_ARTIFACT_VERSION, newVersion] },
+    listArtifactReviewDecisions: async () => { listDecisionCalls += 1; return [{ ...BASE_DECISION, decisionType: 'REQUEST_REVISION' as const }] },
+  })
+  const result = await handleRevisionExecutionStatus(client, ARTIFACT_ID, 'correlation', { ...BASE_EXECUTION_STATUS, executionId: REVISION_EXECUTION_ID, status: 'LLM_RESULT_READY' })
+  assert.ok(result)
+  assert.equal(result?.outcome, 'REFRESHED')
+  if (result?.outcome !== 'REFRESHED') throw new Error('unreachable')
+  assert.equal(getArtifactCalls, 1); assert.equal(listVersionCalls, 1); assert.equal(listDecisionCalls, 1)
+  assert.equal(result.artifact.status, 'DRAFT', 'the auto-generated version resets the Artifact to DRAFT, same as manual createArtifactVersion')
+  assert.equal(result.artifact.currentVersionId, NEW_ARTIFACT_VERSION_ID)
+  assert.ok(result.versions.some((version) => version.artifactVersionId === NEW_ARTIFACT_VERSION_ID))
+})
+
+test('handleRevisionExecutionStatus: a failed generation (FAILED_RETRYABLE/FAILED_FINAL/UNKNOWN) reports a safe message and never refreshes', async () => {
+  for (const status of ['FAILED_RETRYABLE', 'FAILED_FINAL', 'UNKNOWN'] as const) {
+    let getArtifactCalls = 0
+    const client = successfulClient({ getArtifact: async () => { getArtifactCalls += 1; return BASE_ARTIFACT } })
+    const result = await handleRevisionExecutionStatus(client, ARTIFACT_ID, 'correlation', {
+      ...BASE_EXECUTION_STATUS, executionId: REVISION_EXECUTION_ID, status, safeErrorMessage: status === 'FAILED_FINAL' ? 'Bezpieczny komunikat błędu.' : null,
+    })
+    assert.equal(result?.outcome, 'FAILED', status)
+    assert.equal(getArtifactCalls, 0, `${status} must not refresh -- no new version exists`)
+    if (result?.outcome !== 'FAILED') throw new Error('unreachable')
+    assert.ok(result.message.length > 0)
+  }
+})
+
+test('polling the triggered revision Execution: refresh happens exactly once, only after LLM_RESULT_READY (proves no premature or duplicate refresh)', async () => {
+  const sequence = ['WAITING_FOR_LLM_GATEWAY', 'RUNNING', 'LLM_RESULT_READY'] as const
+  let index = 0, getArtifactCalls = 0
+  const client = successfulClient({
+    getExecutionStatus: async () => ({ ...BASE_EXECUTION_STATUS, executionId: REVISION_EXECUTION_ID, status: sequence[index++] }),
+    getArtifact: async () => { getArtifactCalls += 1; return { ...BASE_ARTIFACT, status: 'DRAFT', revision: 4 } },
+  })
+  const outcomes: string[] = []
+  const controller = trackExecutionStatus(client, { executionId: REVISION_EXECUTION_ID, correlationId: 'correlation' }, {
+    wait: async () => {},
+    onState: (status) => {
+      handleRevisionExecutionStatus(client, ARTIFACT_ID, 'correlation', status).then((result) => { if (result) outcomes.push(result.outcome) })
+    },
+  })
+  await controller.whenDone
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.deepEqual(outcomes, ['REFRESHED'])
+  assert.equal(getArtifactCalls, 1, 'the Artifact must be refreshed exactly once, after the Execution reaches LLM_RESULT_READY')
 })

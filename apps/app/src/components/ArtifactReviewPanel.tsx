@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { validateNewVersionContent } from '../lib/validation.js'
-import type { ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse } from '../types.js'
+import type { ArtifactDecisionType, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse } from '../types.js'
 
 const DECISIONS_REQUIRING_COMMENT: ArtifactDecisionType[] = ['REJECT', 'REQUEST_REVISION', 'COMMENT_ONLY']
 
@@ -29,30 +28,24 @@ type Props = {
   onSelectVersion: (versionId: string) => void
   submittingForReview: boolean
   deciding: boolean
-  creatingVersion?: boolean
+  revisionGenerating?: boolean
+  revisionError?: string | null
   safeErrorMessage: string | null
   versionNotice?: string | null
   onSubmitForReview: () => void
   onDecide: (decisionType: ArtifactDecisionType, comment: string, artifactVersionId: string) => void
-  onCreateVersion?: (content: ArtifactNewVersionContent) => void
 }
 
 export function ArtifactReviewPanel({
   artifact, versions, decisions, selectedVersionId, onSelectVersion,
-  submittingForReview, deciding, creatingVersion = false, safeErrorMessage, versionNotice = null,
-  onSubmitForReview, onDecide, onCreateVersion = () => {},
+  submittingForReview, deciding, revisionGenerating = false, revisionError = null, safeErrorMessage, versionNotice = null,
+  onSubmitForReview, onDecide,
 }: Props) {
   const [comment, setComment] = useState('')
-  const [newVersionText, setNewVersionText] = useState('')
-  const [newVersionJson, setNewVersionJson] = useState('')
-  const [newVersionError, setNewVersionError] = useState<string | null>(null)
 
   const currentVersion = versions.find((version) => version.artifactVersionId === artifact.currentVersionId) ?? null
   const selectedVersion = versions.find((version) => version.artifactVersionId === selectedVersionId) ?? currentVersion
   const isCurrentVersionSelected = selectedVersion ? selectedVersion.artifactVersionId === artifact.currentVersionId : true
-  // The new-version form's mode always follows the CURRENT version (the one
-  // being superseded), never whatever the reviewer happens to be previewing.
-  const isJsonMode = currentVersion ? typeof currentVersion.contentJson === 'object' && currentVersion.contentJson !== null : false
 
   // APPROVE/REJECT/REQUEST_REVISION are state-changing and, per the backend
   // (decideArtifact), only ever valid against the current version out of
@@ -66,19 +59,6 @@ export function ArtifactReviewPanel({
     if (DECISIONS_REQUIRING_COMMENT.includes(decisionType) && comment.trim() === '') return
     onDecide(decisionType, comment.trim(), selectedVersion.artifactVersionId)
     setComment('')
-  }
-
-  function submitNewVersion() {
-    if (creatingVersion) return
-    const result = validateNewVersionContent(isJsonMode ? 'JSON' : 'TEXT', newVersionText, newVersionJson)
-    if (!result.ok) { setNewVersionError(result.error); return }
-    setNewVersionError(null)
-    onCreateVersion(result.content)
-    // Not cleared here: on success the Artifact leaves REVISION_REQUESTED
-    // and this whole form unmounts (see the guard below), which resets its
-    // local state for free. On failure the status is unchanged, the form
-    // stays mounted, and the user's typed content must survive so they can
-    // fix and retry instead of retyping everything.
   }
 
   return (
@@ -134,23 +114,10 @@ export function ArtifactReviewPanel({
       {versionNotice && <p role="status" className="success-message">{versionNotice}</p>}
 
       {artifact.status === 'REVISION_REQUESTED' && (
-        <div className="artifact-new-version-form">
-          <h3>Nowa wersja</h3>
-          {isJsonMode ? (
-            <>
-              <label htmlFor="artifact-new-version-json">Treść (JSON)</label>
-              <textarea id="artifact-new-version-json" value={newVersionJson} onChange={(event) => setNewVersionJson(event.target.value)} aria-invalid={Boolean(newVersionError)} />
-            </>
-          ) : (
-            <>
-              <label htmlFor="artifact-new-version-text">Treść</label>
-              <textarea id="artifact-new-version-text" value={newVersionText} onChange={(event) => setNewVersionText(event.target.value)} aria-invalid={Boolean(newVersionError)} />
-            </>
-          )}
-          {newVersionError && <span className="field-error">{newVersionError}</span>}
-          <button className="primary" type="button" onClick={submitNewVersion} disabled={creatingVersion}>
-            {creatingVersion ? 'Tworzenie…' : 'Utwórz nową wersję'}
-          </button>
+        <div className="artifact-revision-generating">
+          {revisionError
+            ? <p role="alert">{revisionError}</p>
+            : <p role="status" className="status status-generating">{revisionGenerating ? 'Trwa generowanie poprawionej wersji…' : 'Oczekiwanie na wygenerowanie poprawionej wersji…'}</p>}
         </div>
       )}
 
