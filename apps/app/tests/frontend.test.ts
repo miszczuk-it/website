@@ -433,65 +433,74 @@ test('createArtifactReviewDecision rejects a triggeredExecutionId that is neithe
 
 test('ArtifactReviewPanel presents both contentText and contentJson version shapes', () => {
   const textHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, submittingForReview: false, deciding: false,
-    safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
+    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, deciding: false,
+    safeErrorMessage: null, onDecide: () => {},
   }))
   assert.ok(textHtml.includes('Treść wyniku analizy Business Analyst.'))
 
   const jsonVersion: ArtifactVersionResponse = { ...BASE_ARTIFACT_VERSION, contentText: undefined, contentJson: { summary: 'ok' } }
   const jsonHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: BASE_ARTIFACT, versions: [jsonVersion], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, submittingForReview: false, deciding: false,
-    safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
+    artifact: BASE_ARTIFACT, versions: [jsonVersion], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, deciding: false,
+    safeErrorMessage: null, onDecide: () => {},
   }))
   assert.ok(jsonHtml.includes('summary'))
   assert.ok(jsonHtml.includes('ok'))
 })
 
-test('ArtifactReviewPanel status matrix: DRAFT offers submit, hides all decisions', () => {
+test('ArtifactReviewPanel status matrix: DRAFT shows no submit button and offers no decisions (MVP-TASK-007: the manual submit-for-review step is gone)', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, submittingForReview: false, deciding: false,
-    safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
+    artifact: BASE_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {}, deciding: false,
+    safeErrorMessage: null, onDecide: () => {},
   }))
-  assert.ok(html.includes('Prześlij do przeglądu'))
+  assert.equal(html.includes('Prześlij do przeglądu'), false)
   for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz']) assert.equal(html.includes(decision), false, decision)
 })
 
-test('ArtifactReviewPanel status matrix: READY_FOR_REVIEW offers all four decisions, hides submit', () => {
+test('ArtifactReviewPanel status matrix: READY_FOR_REVIEW offers exactly Zatwierdź and Poproś o poprawę, never Odrzuć or Dodaj komentarz (MVP-TASK-007)', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
     artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
-    submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
+    deciding: false, safeErrorMessage: null, onDecide: () => {},
   }))
   assert.equal(html.includes('Prześlij do przeglądu'), false)
-  for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz']) assert.ok(html.includes(decision), decision)
+  for (const decision of ['Zatwierdź', 'Poproś o poprawę']) assert.ok(html.includes(decision), decision)
+  for (const decision of ['Odrzuć', 'Dodaj komentarz']) assert.equal(html.includes(decision), false, decision)
 })
 
-test('ArtifactReviewPanel status matrix: APPROVED/REJECTED/REVISION_REQUESTED only offer a comment, ARCHIVED offers nothing', () => {
-  for (const status of ['APPROVED', 'REJECTED', 'REVISION_REQUESTED'] as const) {
+test('ArtifactReviewPanel status matrix: APPROVED/REJECTED/REVISION_REQUESTED/ARCHIVED offer no decisions', () => {
+  for (const status of ['APPROVED', 'REJECTED', 'REVISION_REQUESTED', 'ARCHIVED'] as const) {
     const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
       artifact: { ...BASE_ARTIFACT, status, revision: 2 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
-      submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
+      deciding: false, safeErrorMessage: null, onDecide: () => {},
     }))
-    assert.ok(html.includes('Dodaj komentarz'), status)
-    for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę']) assert.equal(html.includes(decision), false, `${status}/${decision}`)
-  }
-  const archivedHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
-    artifact: { ...BASE_ARTIFACT, status: 'ARCHIVED', revision: 3 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
-    submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
-  }))
-  for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz', 'Prześlij do przeglądu']) {
-    assert.equal(archivedHtml.includes(decision), false, decision)
+    for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz', 'Prześlij do przeglądu']) {
+      assert.equal(html.includes(decision), false, `${status}/${decision}`)
+    }
   }
 })
 
-test('ArtifactReviewPanel disables comment-requiring decisions until a comment is typed, never disables APPROVE', () => {
+test('ArtifactReviewPanel hides the REJECTED status label but still shows the status label for other statuses (MVP-TASK-007)', () => {
+  const rejectedHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: { ...BASE_ARTIFACT, status: 'REJECTED', revision: 2 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
+    deciding: false, safeErrorMessage: null, onDecide: () => {},
+  }))
+  assert.equal(rejectedHtml.includes('REJECTED'), false, 'the raw REJECTED status text must never render on the review screen')
+
+  const approvedHtml = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
+    artifact: { ...BASE_ARTIFACT, status: 'APPROVED', revision: 2 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
+    deciding: false, safeErrorMessage: null, onDecide: () => {},
+  }))
+  assert.ok(approvedHtml.includes('APPROVED'), 'other statuses keep showing their status label')
+})
+
+test('ArtifactReviewPanel disables Poproś o poprawę until a comment is typed, never disables Zatwierdź', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
     artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
-    submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {},
+    deciding: false, safeErrorMessage: null, onDecide: () => {},
   }))
   const buttonPattern = /<button[^>]*>([^<]+)<\/button>/g
   const buttons = new Map<string, string>()
   for (const match of html.matchAll(buttonPattern)) buttons.set(match[1], match[0])
-  for (const label of ['Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz']) assert.match(buttons.get(label) ?? '', /disabled=""/, label)
+  assert.match(buttons.get('Poproś o poprawę') ?? '', /disabled=""/, 'Poproś o poprawę')
   assert.doesNotMatch(buttons.get('Zatwierdź') ?? '', /disabled=""/)
 })
 
@@ -499,7 +508,7 @@ test('ArtifactReviewPanel never fires a decision on render -- no automatic actio
   let calls = 0
   renderToStaticMarkup(createElement(ArtifactReviewPanel, {
     artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
-    submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => { calls += 1 }, onDecide: () => { calls += 1 },
+    deciding: false, safeErrorMessage: null, onDecide: () => { calls += 1 },
   }))
   assert.equal(calls, 0)
 })
@@ -507,8 +516,8 @@ test('ArtifactReviewPanel never fires a decision on render -- no automatic actio
 test('ArtifactReviewPanel renders a safe error message without leaking raw response shape', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
     artifact: { ...BASE_ARTIFACT, status: 'READY_FOR_REVIEW', revision: 1 }, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
-    submittingForReview: false, deciding: false, safeErrorMessage: 'Dane zostały zmienione. Odśwież stan przed ponowieniem.',
-    onSubmitForReview: () => {}, onDecide: () => {},
+    deciding: false, safeErrorMessage: 'Dane zostały zmienione. Odśwież stan przed ponowieniem.',
+    onDecide: () => {},
   }))
   assert.ok(html.includes('Dane zostały zmienione. Odśwież stan przed ponowieniem.'))
   for (const forbidden of ['stack', 'Error:', 'errorCode', 'currentRevision']) assert.equal(html.toLowerCase().includes(forbidden.toLowerCase()), false, forbidden)
@@ -521,7 +530,7 @@ test('AnalysisWorkspace shows the Artifact review section only once the Executio
 
 // --- New-version-after-REVISION_REQUESTED (missing scope closed in this session) ---
 
-const noopPanelProps = { submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => {} }
+const noopPanelProps = { deciding: false, safeErrorMessage: null, onDecide: () => {} }
 
 test('1. REVISION_REQUESTED hides the manual new-version form and shows a generating status instead (MVP-TASK-006: revision is auto-generated)', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
@@ -550,7 +559,7 @@ test('REVISION_REQUESTED shows a safe error message (not the generating status) 
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
     artifact: REVISION_REQUESTED_ARTIFACT, versions: [BASE_ARTIFACT_VERSION], decisions: [], selectedVersionId: null, onSelectVersion: () => {},
     revisionGenerating: false, revisionError: 'Generowanie poprawionej wersji nie powiodło się.', versionNotice: null,
-    submittingForReview: false, deciding: false, safeErrorMessage: null, onSubmitForReview: () => {}, onDecide: () => { calls += 1 },
+    deciding: false, safeErrorMessage: null, onDecide: () => { calls += 1 },
   }))
   assert.ok(html.includes('Generowanie poprawionej wersji nie powiodło się.'))
   assert.equal(html.includes('Trwa generowanie poprawionej wersji'), false)
@@ -731,15 +740,14 @@ test('version history lists both current and historical versions with the right 
   assert.ok(html.includes(BASE_ARTIFACT_VERSION.createdByType))
 })
 
-test('selecting a historical version previews its content and hides state-changing decisions, keeping COMMENT_ONLY', () => {
+test('selecting a historical version previews its content and hides all decisions (MVP-TASK-007: decisions only ever target the current version)', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
     artifact: ARTIFACT_WITH_TWO_VERSIONS, versions: [BASE_ARTIFACT_VERSION, CURRENT_ARTIFACT_VERSION_V2], decisions: [],
     selectedVersionId: BASE_ARTIFACT_VERSION.artifactVersionId, onSelectVersion: () => {}, ...noopPanelProps,
   }))
   assert.ok(html.includes('Treść wyniku analizy Business Analyst.'), 'must preview the selected historical version, not current')
   assert.equal(html.includes('Nowa treść po poprawkach.'), false, 'must not preview current while a historical version is selected')
-  for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę']) assert.equal(html.includes(decision), false, decision)
-  assert.ok(html.includes('Dodaj komentarz'), 'COMMENT_ONLY must remain available for a historical version (decideArtifact places no such restriction on it)')
+  for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz']) assert.equal(html.includes(decision), false, decision)
 })
 
 test('no selection defaults to previewing the current version', () => {
@@ -751,12 +759,13 @@ test('no selection defaults to previewing the current version', () => {
   assert.equal(html.includes('Treść wyniku analizy Business Analyst.'), false)
 })
 
-test('APPROVE/REJECT/REQUEST_REVISION remain available when the current version is selected', () => {
+test('Zatwierdź/Poproś o poprawę remain available when the current version is selected, Odrzuć/Dodaj komentarz never do', () => {
   const html = renderToStaticMarkup(createElement(ArtifactReviewPanel, {
     artifact: ARTIFACT_WITH_TWO_VERSIONS, versions: [BASE_ARTIFACT_VERSION, CURRENT_ARTIFACT_VERSION_V2], decisions: [],
     selectedVersionId: CURRENT_ARTIFACT_VERSION_V2.artifactVersionId, onSelectVersion: () => {}, ...noopPanelProps,
   }))
-  for (const decision of ['Zatwierdź', 'Odrzuć', 'Poproś o poprawę', 'Dodaj komentarz']) assert.ok(html.includes(decision), decision)
+  for (const decision of ['Zatwierdź', 'Poproś o poprawę']) assert.ok(html.includes(decision), decision)
+  for (const decision of ['Odrzuć', 'Dodaj komentarz']) assert.equal(html.includes(decision), false, decision)
 })
 
 test('decision history renders decisionType, comment, actorReference, createdAt and the target version, without technical fields', () => {

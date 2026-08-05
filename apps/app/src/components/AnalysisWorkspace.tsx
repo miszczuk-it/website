@@ -90,7 +90,6 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const [artifactDecisions, setArtifactDecisions] = useState<ArtifactReviewDecisionResponse[]>([])
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
   const [creatingArtifact, setCreatingArtifact] = useState(false)
-  const [submittingForReview, setSubmittingForReview] = useState(false)
   const [deciding, setDeciding] = useState(false)
   const [revisionGenerating, setRevisionGenerating] = useState(false)
   const [revisionError, setRevisionError] = useState<string | null>(null)
@@ -100,7 +99,6 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const startGuard = useRef<SingleFlightGuard>({ busy: false })
   const retryGuard = useRef<SingleFlightGuard>({ busy: false })
   const createArtifactGuard = useRef<SingleFlightGuard>({ busy: false })
-  const submitReviewGuard = useRef<SingleFlightGuard>({ busy: false })
   const decisionGuard = useRef<SingleFlightGuard>({ busy: false })
   const executionIdempotencyKey = useRef<string | null>(null)
   const artifactIdempotencyKey = useRef<string | null>(null)
@@ -256,40 +254,10 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
     }
   }
 
-  async function submitArtifactForReview() {
-    if (submittingForReview || !artifact || artifact.status !== 'DRAFT' || !artifact.currentVersionId) return
-    setSubmittingForReview(true); setArtifactSafeError(null); setVersionNotice(null)
-    const correlationId = flow?.correlationId ?? execution?.correlationId ?? artifact.artifactId
-    try {
-      const idempotencyKey = crypto.randomUUID()
-      const updated = await runGuarded(submitReviewGuard.current, () => client.submitArtifactForReview(
-        artifact.artifactId, artifact.revision, artifact.currentVersionId!, idempotencyKey, correlationId,
-      ))
-      if (updated) {
-        setArtifact(updated)
-        await refreshArtifactHistory(updated.artifactId, updated.currentVersionId, correlationId)
-      }
-    } catch (error) {
-      if (error instanceof PlatformApiError && error.code === 'CONFLICT') {
-        setArtifactSafeError({ message: 'Stan Artifact zmienił się w międzyczasie. Status został odświeżony.' })
-        try {
-          const fresh = await client.getArtifact(artifact.artifactId, correlationId)
-          setArtifact(fresh)
-          await refreshArtifactHistory(fresh.artifactId, fresh.currentVersionId, correlationId)
-        } catch { /* best-effort refresh */ }
-      } else {
-        setArtifactSafeError(toSafeUiError(error))
-      }
-    } finally {
-      setSubmittingForReview(false)
-    }
-  }
-
   // artifactVersionId comes from the panel's currently PREVIEWED version --
-  // for APPROVE/REJECT/REQUEST_REVISION that is always the current version
-  // (the panel only offers them there), but COMMENT_ONLY may legitimately
-  // target a historical one (decideArtifact places no such restriction on
-  // COMMENT_ONLY server-side).
+  // the panel only offers APPROVE/REQUEST_REVISION against the current
+  // version, never a historical one (MVP-TASK-007: REJECT/COMMENT_ONLY are
+  // not offered on this screen at all).
   async function decideOnArtifact(decisionType: ArtifactDecisionType, comment: string, artifactVersionId: string) {
     if (deciding || !artifact) return
     setDeciding(true); setArtifactSafeError(null); setVersionNotice(null)
@@ -428,13 +396,11 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
               decisions={artifactDecisions}
               selectedVersionId={selectedVersionId}
               onSelectVersion={setSelectedVersionId}
-              submittingForReview={submittingForReview}
               deciding={deciding}
               revisionGenerating={revisionGenerating}
               revisionError={revisionError}
               safeErrorMessage={artifactSafeError?.message ?? null}
               versionNotice={versionNotice}
-              onSubmitForReview={submitArtifactForReview}
               onDecide={decideOnArtifact}
             />
           )}
