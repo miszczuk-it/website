@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createFlowState, nextIncompleteStep, runMvpFlow } from '../lib/mvp-flow.js'
-import { createArtifactVersionAndRefresh, decideArtifactAndRefresh } from '../lib/artifact-flow.js'
+import { decideArtifactAndRefresh, handleRevisionExecutionStatus } from '../lib/artifact-flow.js'
 import { EXECUTION_POLLING_STATUSES, runGuarded, trackExecutionStatus, type PollController, type SingleFlightGuard } from '../lib/execution-flow.js'
 import { createPlatformApiClient, type PlatformApiClient } from '../lib/platform-api.js'
 import { PlatformApiError, toSafeUiError, type SafeUiError } from '../lib/safe-error.js'
 import { validateAnalysisForm, type FormErrors } from '../lib/validation.js'
 import { ArtifactReviewPanel } from './ArtifactReviewPanel.js'
 import type {
-  AnalysisFormValues, ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
+  AnalysisFormValues, ArtifactDecisionType, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
   ExecutionResponse, ExecutionStatus, ExecutionStatusResponse, FlowStep, MvpFlowState,
 } from '../types.js'
 
@@ -92,7 +92,8 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const [creatingArtifact, setCreatingArtifact] = useState(false)
   const [submittingForReview, setSubmittingForReview] = useState(false)
   const [deciding, setDeciding] = useState(false)
-  const [creatingVersion, setCreatingVersion] = useState(false)
+  const [revisionGenerating, setRevisionGenerating] = useState(false)
+  const [revisionError, setRevisionError] = useState<string | null>(null)
   const [versionNotice, setVersionNotice] = useState<string | null>(null)
   const [artifactSafeError, setArtifactSafeError] = useState<SafeUiError | null>(null)
   const submitting = useRef(false)
@@ -101,10 +102,10 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const createArtifactGuard = useRef<SingleFlightGuard>({ busy: false })
   const submitReviewGuard = useRef<SingleFlightGuard>({ busy: false })
   const decisionGuard = useRef<SingleFlightGuard>({ busy: false })
-  const createVersionGuard = useRef<SingleFlightGuard>({ busy: false })
   const executionIdempotencyKey = useRef<string | null>(null)
   const artifactIdempotencyKey = useRef<string | null>(null)
   const pollController = useRef<PollController | null>(null)
+  const revisionPollController = useRef<PollController | null>(null)
   const projectNameInput = useRef<HTMLInputElement>(null)
   const goalInput = useRef<HTMLTextAreaElement>(null)
   const taskInput = useRef<HTMLTextAreaElement>(null)
@@ -115,7 +116,7 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const failedStep = flow?.step === 'FAILED' ? nextIncompleteStep(flow) : null
 
   // Stop polling on unmount -- no orphaned intervals outliving the view.
-  useEffect(() => () => { pollController.current?.stop() }, [])
+  useEffect(() => () => { pollController.current?.stop(); revisionPollController.current?.stop() }, [])
 
   function updateField(field: keyof AnalysisFormValues, value: string) {
     setValues((current) => ({ ...current, [field]: value }))
@@ -301,6 +302,7 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
       if (result?.outcome === 'DECIDED') {
         setArtifact(result.artifact); setArtifactVersions(result.versions); setArtifactDecisions(result.decisions)
         reconcileSelectedVersion(result.versions, result.artifact.currentVersionId)
+        if (result.triggeredExecutionId) beginRevisionPolling(result.triggeredExecutionId, result.artifact.artifactId, correlationId)
       } else if (result?.outcome === 'ERROR') {
         setArtifactSafeError(toSafeUiError(result.error))
         if (result.refreshed) {
@@ -313,37 +315,32 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
     }
   }
 
-  // Creates a brand new ArtifactVersion while the Artifact is
-  // REVISION_REQUESTED (task binding decision: manual authoring is only
-  // reachable from this status, never a rich editor). The multi-step
-  // orchestration (create -> refresh, or conflict -> read-only refresh,
-  // never an automatic replay of the write) lives in createArtifactVersionAndRefresh
-  // so it stays unit-testable without a DOM harness; this handler only
-  // wires guard/state around it, matching the runMvpFlow/submit() split above.
-  async function createNewArtifactVersion(content: ArtifactNewVersionContent) {
-    const currentVersion = artifactVersions.find((version) => version.artifactVersionId === artifact?.currentVersionId) ?? null
-    if (creatingVersion || !artifact || artifact.status !== 'REVISION_REQUESTED' || !currentVersion) return
-    setCreatingVersion(true); setArtifactSafeError(null); setVersionNotice(null)
-    const correlationId = flow?.correlationId ?? execution?.correlationId ?? artifact.artifactId
-    const idempotencyKey = crypto.randomUUID()
-    try {
-      const result = await runGuarded(createVersionGuard.current, () => createArtifactVersionAndRefresh(
-        client, artifact, currentVersion, content, idempotencyKey, correlationId,
-      ))
-      if (result?.outcome === 'CREATED') {
-        setArtifact(result.artifact); setArtifactVersions(result.versions); setVersionNotice(result.notice)
-        setSelectedVersionId(result.artifact.currentVersionId)
-        client.listArtifactReviewDecisions(result.artifact.artifactId, correlationId).then(setArtifactDecisions).catch(() => {})
-      } else if (result?.outcome === 'CONFLICT') {
-        setArtifact(result.artifact); setArtifactVersions(result.versions); setArtifactSafeError({ message: result.message })
-        reconcileSelectedVersion(result.versions, result.artifact.currentVersionId)
-        client.listArtifactReviewDecisions(result.artifact.artifactId, correlationId).then(setArtifactDecisions).catch(() => {})
-      } else if (result?.outcome === 'ERROR') {
-        setArtifactSafeError(toSafeUiError(result.error))
-      }
-    } finally {
-      setCreatingVersion(false)
-    }
+  // Tracks the Execution that REQUEST_REVISION triggers server-side
+  // (MVP-TASK-006): the new ArtifactVersion is produced automatically by
+  // the backend's own gateway-callback handler once that Execution reaches
+  // LLM_RESULT_READY, so there is nothing left for the reviewer to author
+  // manually -- this only polls and then re-reads the already-committed
+  // Artifact/version/decision state via handleRevisionExecutionStatus.
+  function beginRevisionPolling(executionId: string, artifactId: string, correlationId: string) {
+    revisionPollController.current?.stop()
+    setRevisionGenerating(true); setRevisionError(null)
+    revisionPollController.current = trackExecutionStatus(client, { executionId, correlationId }, {
+      onState: (status) => {
+        handleRevisionExecutionStatus(client, artifactId, correlationId, status).then((result) => {
+          if (!result) return
+          setRevisionGenerating(false)
+          if (result.outcome === 'REFRESHED') {
+            setArtifact(result.artifact); setArtifactVersions(result.versions); setArtifactDecisions(result.decisions)
+            reconcileSelectedVersion(result.versions, result.artifact.currentVersionId)
+          } else if (result.outcome === 'FAILED') {
+            setRevisionError(result.message)
+          } else {
+            setRevisionError('Nie udało się odświeżyć danych Artifact po wygenerowaniu poprawionej wersji.')
+          }
+        })
+      },
+      onError: () => { setRevisionGenerating(false); setRevisionError('Nie udało się sprawdzić statusu generowania poprawionej wersji.') },
+    })
   }
 
   return (
@@ -433,12 +430,12 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
               onSelectVersion={setSelectedVersionId}
               submittingForReview={submittingForReview}
               deciding={deciding}
-              creatingVersion={creatingVersion}
+              revisionGenerating={revisionGenerating}
+              revisionError={revisionError}
               safeErrorMessage={artifactSafeError?.message ?? null}
               versionNotice={versionNotice}
               onSubmitForReview={submitArtifactForReview}
               onDecide={decideOnArtifact}
-              onCreateVersion={createNewArtifactVersion}
             />
           )}
           {!artifact && artifactSafeError && <p role="alert">{artifactSafeError.message}</p>}

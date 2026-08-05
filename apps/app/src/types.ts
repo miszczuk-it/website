@@ -130,3 +130,14 @@ export type ArtifactReviewDecisionResponse = {
   idempotencyKey: string
   createdAt: string
 }
+
+// Response envelope for POST /artifacts/:id/decisions (MVP-TASK-006):
+// the decision write and the REQUEST_REVISION-triggered Execution are
+// reported together so the frontend can start tracking the new Execution
+// without a second round-trip. GET /decisions (list/detail) is unaffected
+// and still returns bare ArtifactReviewDecisionResponse shapes.
+export type ArtifactReviewDecisionEnvelope = {
+  contractVersion: '1.0'
+  reviewDecision: ArtifactReviewDecisionResponse
+  triggeredExecutionId: string | null
+}

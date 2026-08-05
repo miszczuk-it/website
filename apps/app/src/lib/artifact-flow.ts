@@ -1,4 +1,5 @@
-import type { ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse } from '../types.js'
+import type { ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse, ExecutionStatusResponse } from '../types.js'
+import { EXECUTION_POLLING_STATUSES } from './execution-flow.js'
 import type { PlatformApiClient } from './platform-api.js'
 import { PlatformApiError } from './safe-error.js'
 
@@ -56,7 +57,7 @@ export async function createArtifactVersionAndRefresh(
 type ArtifactHistorySnapshot = { artifact: ArtifactResponse; versions: ArtifactVersionResponse[]; decisions: ArtifactReviewDecisionResponse[] }
 
 export type ArtifactDecisionResult =
-  | ({ outcome: 'DECIDED' } & ArtifactHistorySnapshot)
+  | ({ outcome: 'DECIDED'; triggeredExecutionId: string | null } & ArtifactHistorySnapshot)
   | { outcome: 'ERROR'; error: unknown; refreshed: ArtifactHistorySnapshot | null }
 
 async function snapshotArtifactHistory(client: PlatformApiClient, artifactId: string, correlationId: string): Promise<ArtifactHistorySnapshot> {
@@ -81,8 +82,10 @@ export async function decideArtifactAndRefresh(
   idempotencyKey: string,
   correlationId: string,
 ): Promise<ArtifactDecisionResult> {
+  let triggeredExecutionId: string | null
   try {
-    await client.createArtifactReviewDecision(artifact.artifactId, artifactVersionId, decisionType, artifact.revision, idempotencyKey, correlationId, comment || undefined)
+    const envelope = await client.createArtifactReviewDecision(artifact.artifactId, artifactVersionId, decisionType, artifact.revision, idempotencyKey, correlationId, comment || undefined)
+    triggeredExecutionId = envelope.triggeredExecutionId
   } catch (error) {
     // The decision write itself failed (e.g. stale expectedVersion, or a
     // decision already resolved this Artifact) -- refresh read-only state
@@ -94,5 +97,35 @@ export async function decideArtifactAndRefresh(
       return { outcome: 'ERROR', error, refreshed: null }
     }
   }
-  return { outcome: 'DECIDED', ...(await snapshotArtifactHistory(client, artifact.artifactId, correlationId)) }
+  return { outcome: 'DECIDED', triggeredExecutionId, ...(await snapshotArtifactHistory(client, artifact.artifactId, correlationId)) }
+}
+
+export type RevisionExecutionOutcome =
+  | ({ outcome: 'REFRESHED' } & ArtifactHistorySnapshot)
+  | { outcome: 'FAILED'; message: string }
+  | { outcome: 'REFRESH_ERROR' }
+
+// Feeds the triggeredExecutionId poll's onState callback (AnalysisWorkspace).
+// Returns null while the Execution is still in flight (poll continues).
+// LLM_RESULT_READY means the backend's gateway-callback handler
+// (advanceArtifactRevision in app.mjs) has already produced the next
+// ArtifactVersion and reset the Artifact to DRAFT server-side -- this only
+// re-reads that already-committed state, it never writes anything itself.
+// Any other terminal status (FAILED_RETRYABLE/FAILED_FINAL/CANCELLED/UNKNOWN)
+// means no new version was produced; the Artifact stays REVISION_REQUESTED.
+export async function handleRevisionExecutionStatus(
+  client: PlatformApiClient,
+  artifactId: string,
+  correlationId: string,
+  status: ExecutionStatusResponse,
+): Promise<RevisionExecutionOutcome | null> {
+  if (EXECUTION_POLLING_STATUSES.has(status.status)) return null
+  if (status.status !== 'LLM_RESULT_READY') {
+    return { outcome: 'FAILED', message: status.safeErrorMessage ?? 'Generowanie poprawionej wersji nie powiodło się.' }
+  }
+  try {
+    return { outcome: 'REFRESHED', ...(await snapshotArtifactHistory(client, artifactId, correlationId)) }
+  } catch {
+    return { outcome: 'REFRESH_ERROR' }
+  }
 }
