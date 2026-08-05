@@ -10,13 +10,15 @@ const DECISION_LABELS: Record<ArtifactDecisionType, string> = {
   COMMENT_ONLY: 'Dodaj komentarz',
 }
 
-// Which decisions are offered per Artifact status -- mirrors the backend
-// automat in artifact-orchestrator.mjs (decideArtifact) without duplicating
-// its transition logic: the frontend only decides what to *show*, the
-// backend is still the sole authority on whether a decision is accepted.
+// MVP-TASK-007: the Artifact review screen offers exactly two decisions --
+// APPROVE and REQUEST_REVISION. REJECT and COMMENT_ONLY stay fully
+// supported server-side (decideArtifact, artifact_review_decisions) and
+// still render in the decision history below; their own UI entry points on
+// this screen are out of scope here and land in a separate process-
+// management task. The frontend only decides what to *show* -- the backend
+// remains the sole authority on whether a decision is accepted.
 function decisionsFor(status: ArtifactResponse['status']): ArtifactDecisionType[] {
-  if (status === 'READY_FOR_REVIEW') return ['APPROVE', 'REJECT', 'REQUEST_REVISION', 'COMMENT_ONLY']
-  if (status === 'APPROVED' || status === 'REJECTED' || status === 'REVISION_REQUESTED') return ['COMMENT_ONLY']
+  if (status === 'READY_FOR_REVIEW') return ['APPROVE', 'REQUEST_REVISION']
   return []
 }
 
@@ -26,20 +28,18 @@ type Props = {
   decisions: ArtifactReviewDecisionResponse[]
   selectedVersionId: string | null
   onSelectVersion: (versionId: string) => void
-  submittingForReview: boolean
   deciding: boolean
   revisionGenerating?: boolean
   revisionError?: string | null
   safeErrorMessage: string | null
   versionNotice?: string | null
-  onSubmitForReview: () => void
   onDecide: (decisionType: ArtifactDecisionType, comment: string, artifactVersionId: string) => void
 }
 
 export function ArtifactReviewPanel({
   artifact, versions, decisions, selectedVersionId, onSelectVersion,
-  submittingForReview, deciding, revisionGenerating = false, revisionError = null, safeErrorMessage, versionNotice = null,
-  onSubmitForReview, onDecide,
+  deciding, revisionGenerating = false, revisionError = null, safeErrorMessage, versionNotice = null,
+  onDecide,
 }: Props) {
   const [comment, setComment] = useState('')
 
@@ -47,12 +47,10 @@ export function ArtifactReviewPanel({
   const selectedVersion = versions.find((version) => version.artifactVersionId === selectedVersionId) ?? currentVersion
   const isCurrentVersionSelected = selectedVersion ? selectedVersion.artifactVersionId === artifact.currentVersionId : true
 
-  // APPROVE/REJECT/REQUEST_REVISION are state-changing and, per the backend
+  // APPROVE/REQUEST_REVISION are state-changing and, per the backend
   // (decideArtifact), only ever valid against the current version out of
-  // READY_FOR_REVIEW -- never a historical one. COMMENT_ONLY carries no such
-  // restriction server-side, so it stays available while previewing history.
-  const statusDecisions = decisionsFor(artifact.status)
-  const availableDecisions = isCurrentVersionSelected ? statusDecisions : statusDecisions.filter((decision) => decision === 'COMMENT_ONLY')
+  // READY_FOR_REVIEW -- never a historical one.
+  const availableDecisions = isCurrentVersionSelected ? decisionsFor(artifact.status) : []
 
   function submitDecision(decisionType: ArtifactDecisionType) {
     if (deciding || !selectedVersion) return
@@ -67,7 +65,9 @@ export function ArtifactReviewPanel({
         <dt>Artifact</dt><dd>{artifact.title}</dd>
         <dt>Typ</dt><dd>{artifact.artifactType}</dd>
       </dl>
-      <p role="status" className={`status status-${artifact.status.toLowerCase()}`}>{artifact.status}</p>
+      {artifact.status !== 'REJECTED' && (
+        <p role="status" className={`status status-${artifact.status.toLowerCase()}`}>{artifact.status}</p>
+      )}
 
       {versions.length > 0 && (
         <div className="artifact-version-history">
@@ -104,12 +104,6 @@ export function ArtifactReviewPanel({
         </div>
       )}
 
-      {artifact.status === 'DRAFT' && (
-        <button className="primary" type="button" onClick={onSubmitForReview} disabled={submittingForReview}>
-          {submittingForReview ? 'Przesyłanie…' : 'Prześlij do przeglądu'}
-        </button>
-      )}
-
       {safeErrorMessage && <p role="alert">{safeErrorMessage}</p>}
       {versionNotice && <p role="status" className="success-message">{versionNotice}</p>}
 
@@ -123,7 +117,6 @@ export function ArtifactReviewPanel({
 
       {availableDecisions.length > 0 && selectedVersion && (
         <div className="artifact-decisions">
-          {!isCurrentVersionSelected && <p className="notice-inline">Podgląd wersji historycznej — dostępny tylko komentarz.</p>}
           <label htmlFor="artifact-decision-comment">Komentarz</label>
           <textarea id="artifact-decision-comment" value={comment} onChange={(event) => setComment(event.target.value)} maxLength={5000} />
           <div className="artifact-decision-buttons">
