@@ -109,7 +109,7 @@ jobs:
           tar -xzf "$stage/website.tar.gz" -C "$unpacked"
           [[ -f "$unpacked/index.html" ]] || { echo "Staging index.html is missing" >&2; exit 1; }
           [[ -n "$(find "$unpacked" -mindepth 1 -print -quit)" ]] || { echo "Staging build is empty" >&2; exit 1; }
-          backup="${site_path}.backup.auto.$(date -u +%Y%m%dT%H%M%SZ).${deployed_sha:0:12}"
+          backup="$HOME/website-backups/site.backup.auto.$(date -u +%Y%m%dT%H%M%SZ).${deployed_sha:0:12}"
           changed=0
           rollback_on_error() {
             status="$?"
@@ -119,7 +119,7 @@ jobs:
             exit "$status"
           }
           trap rollback_on_error ERR
-          mkdir -p "$backup"
+          mkdir -p "$HOME/website-backups" "$backup"
           rsync -a "$site_path/" "$backup/"
           changed=1
           rsync -a --delete "$unpacked/" "$site_path/"
@@ -127,7 +127,7 @@ jobs:
           REMOTE_SCRIPT
           )"
           backup_path="${result#BACKUP_PATH=}"
-          [[ "$backup_path" == /opt/docker/www/site.backup.auto.* ]] || { echo "Invalid backup path returned" >&2; exit 1; }
+          [[ "$backup_path" == */website-backups/site.backup.auto.* ]] || { echo "Invalid backup path returned" >&2; exit 1; }
           echo "backup_path=$backup_path" >> "$GITHUB_OUTPUT"
           echo "Production backup: $backup_path"
 
@@ -170,7 +170,7 @@ jobs:
           backup="$1"
           site_path="$2"
           [[ "$site_path" == "/opt/docker/www/site" ]]
-          [[ "$backup" == /opt/docker/www/site.backup.auto.* && -d "$backup" ]]
+          [[ "$backup" == */website-backups/site.backup.auto.* && -d "$backup" ]]
           rsync -a --delete "$backup/" "$site_path/"
           REMOTE_SCRIPT
           restored="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://miszczuk.it/ || true)"
