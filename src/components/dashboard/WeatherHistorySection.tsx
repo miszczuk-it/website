@@ -14,27 +14,44 @@ interface HistoryResult {
   error: boolean
 }
 
-export function WeatherHistorySection() {
+interface WeatherHistorySectionProps {
+  refreshKey: number
+  onRefreshComplete: (source: 'history', key: number, successful: boolean) => void
+}
+
+export function WeatherHistorySection({ refreshKey, onRefreshComplete }: WeatherHistorySectionProps) {
   const [hours, setHours] = useState<number>(24)
   const [result, setResult] = useState<HistoryResult | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    let successful = false
     getWeatherHistory(hours)
       .then((data) => {
+        successful = true
         if (!cancelled) setResult({ hours, history: data, error: false })
       })
       .catch(() => {
-        if (!cancelled) setResult({ hours, history: null, error: true })
+        if (!cancelled) {
+          setResult((previous) =>
+            previous?.hours === hours && previous.history
+              ? { ...previous, error: true }
+              : { hours, history: null, error: true },
+          )
+        }
+      })
+      .finally(() => {
+        if (!cancelled) onRefreshComplete('history', refreshKey, successful)
       })
     return () => {
       cancelled = true
     }
-  }, [hours])
+  }, [hours, onRefreshComplete, refreshKey])
 
   const loading = result === null || result.hours !== hours
-  const error = !loading && result.error
-  const history = !loading && !error ? result.history : null
+  const history = !loading ? result.history : null
+  const error = !loading && result.error && !history
+  const refreshError = !loading && result.error && Boolean(history)
   const points = history?.points ?? []
   const temperaturePoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.temperature_avg_c }))
   const pressurePoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.pressure_avg_hpa }))
@@ -78,7 +95,13 @@ export function WeatherHistorySection() {
         </p>
       )}
 
-      {!loading && !error && history && (
+      {refreshError && (
+        <p role="status" className="mt-6 text-sm text-amber-200">
+          Nie udało się odświeżyć danych. Wyświetlane są ostatnie dostępne dane.
+        </p>
+      )}
+
+      {!loading && history && (
         <>
           {points.length === 0 ? (
             <p className="mt-6 text-slate-400">Brak jeszcze danych historycznych dla wybranego okresu.</p>

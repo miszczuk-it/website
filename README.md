@@ -48,6 +48,10 @@ odpowiednie API nie zostanie zaimplementowane.
 
 ## `/road-monitor`
 
+Dashboard automatycznie sprawdza API co 5 minut. Polling jest wstrzymany, gdy karta jest ukryta;
+po powrocie odświeżenie następuje tylko wtedy, gdy ostatni udany cykl jest już nieświeży. Dostępny
+jest też przycisk ręcznego odświeżenia aktualnych warunków i wybranego zakresu historii.
+
 Podstrona portfolio dla projektu [IoT Road Monitor](https://github.com/miszczuk-it/iot-road-monitor)
 (`src/pages/RoadMonitorPage.tsx`), część głównego workspace `miszczuk.it` — bez osobnego routera:
 routing jest realizowany przez minimalny `src/router.tsx` oparty o `pathname` +
