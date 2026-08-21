@@ -1,0 +1,208 @@
+name: Deploy Website
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy main
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+
+      - id: metadata
+        name: Record deployed revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "deployed_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@49933ea5288caeca8642e1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Package deployable artifact
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          artifact="website-${{ steps.metadata.outputs.deployed_sha }}.tar.gz"
+          tar -czf "$artifact" -C dist .
+          test -s "$artifact"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+
+      - name: Configure pinned SSH connection
+        shell: bash
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_website_deploy"
+          printf '%s\n' "$PROD_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          cat > "$HOME/.ssh/config" <<EOF
+          Host website-production
+            HostName $PROD_SSH_HOST
+            User $PROD_SSH_USER
+            IdentityFile $HOME/.ssh/id_website_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $HOME/.ssh/known_hosts
+          EOF
+          chmod 600 "$HOME/.ssh/id_website_deploy" "$HOME/.ssh/config" "$HOME/.ssh/known_hosts"
+
+      - name: Upload artifact to remote staging
+        id: upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="website-deployments/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "stage=$stage" >> "$GITHUB_OUTPUT"
+          ssh website-production "mkdir -p '$stage'"
+          scp "${{ steps.artifact.outputs.artifact }}" "website-production:$stage/website.tar.gz"
+
+      - name: Validate, back up, and publish
+        id: deploy
+        shell: bash
+        env:
+          PROD_SITE_PATH: ${{ vars.PROD_SITE_PATH }}
+        run: |
+          set -euo pipefail
+          stage="${{ steps.upload.outputs.stage }}"
+          result="$(ssh website-production bash -s -- "$stage" "$PROD_SITE_PATH" "${{ steps.metadata.outputs.deployed_sha }}" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          stage="$1"
+          site_path="$2"
+          deployed_sha="$3"
+          [[ "$site_path" == "/opt/docker/www/site" ]] || { echo "Unexpected production path" >&2; exit 1; }
+          [[ -d "$site_path" && -w "$site_path" ]] || { echo "Production site is not writable" >&2; exit 1; }
+          [[ -s "$stage/website.tar.gz" ]] || exit 1
+          unpacked="$stage/unpacked"
+          mkdir -p "$unpacked"
+          tar -xzf "$stage/website.tar.gz" -C "$unpacked"
+          [[ -f "$unpacked/index.html" ]] || { echo "Staging index.html is missing" >&2; exit 1; }
+          [[ -n "$(find "$unpacked" -mindepth 1 -print -quit)" ]] || { echo "Staging build is empty" >&2; exit 1; }
+          backup="${site_path}.backup.auto.$(date -u +%Y%m%dT%H%M%SZ).${deployed_sha:0:12}"
+          changed=0
+          rollback_on_error() {
+            status="$?"
+            if [[ "$changed" == 1 && -d "$backup" ]]; then
+              rsync -a --delete "$backup/" "$site_path/" || true
+            fi
+            exit "$status"
+          }
+          trap rollback_on_error ERR
+          mkdir -p "$backup"
+          rsync -a "$site_path/" "$backup/"
+          changed=1
+          rsync -a --delete "$unpacked/" "$site_path/"
+          echo "BACKUP_PATH=$backup"
+          REMOTE_SCRIPT
+          )"
+          backup_path="${result#BACKUP_PATH=}"
+          [[ "$backup_path" == /opt/docker/www/site.backup.auto.* ]] || { echo "Invalid backup path returned" >&2; exit 1; }
+          echo "backup_path=$backup_path" >> "$GITHUB_OUTPUT"
+          echo "Production backup: $backup_path"
+
+      - name: Smoke test public endpoints
+        id: smoke
+        shell: bash
+        run: |
+          set -uo pipefail
+          http_status() {
+            local url="$1" code=000
+            for _ in 1 2 3 4 5; do
+              code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 "$url" || true)"
+              [[ "$code" == 200 ]] && break
+              sleep 2
+            done
+            printf '%s' "$code"
+          }
+          homepage="$(http_status 'https://miszczuk.it/')"
+          www="$(http_status 'https://www.miszczuk.it/')"
+          road_monitor="$(http_status 'https://miszczuk.it/road-monitor')"
+          road_monitor_slash="$(http_status 'https://miszczuk.it/road-monitor/')"
+          dashboard_api="$(http_status 'https://api.miszczuk.it/iot/v1/dashboard/current')"
+          {
+            echo "homepage_http=$homepage"
+            echo "www_http=$www"
+            echo "road_monitor_http=$road_monitor"
+            echo "road_monitor_slash_http=$road_monitor_slash"
+            echo "dashboard_api_http=$dashboard_api"
+          } >> "$GITHUB_OUTPUT"
+          [[ "$homepage" == 200 && "$www" == 200 && "$road_monitor" == 200 && "$road_monitor_slash" == 200 && "$dashboard_api" == 200 ]]
+
+      - name: Roll back after failed smoke test
+        id: rollback
+        if: ${{ failure() && steps.deploy.outputs.backup_path != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh website-production bash -s -- "${{ steps.deploy.outputs.backup_path }}" "${{ vars.PROD_SITE_PATH }}" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          backup="$1"
+          site_path="$2"
+          [[ "$site_path" == "/opt/docker/www/site" ]]
+          [[ "$backup" == /opt/docker/www/site.backup.auto.* && -d "$backup" ]]
+          rsync -a --delete "$backup/" "$site_path/"
+          REMOTE_SCRIPT
+          restored="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 https://miszczuk.it/ || true)"
+          echo "rollback=YES" >> "$GITHUB_OUTPUT"
+          [[ "$restored" == 200 ]] && echo "ROLLBACK SUCCESS" || { echo "ROLLBACK FAILED" >&2; exit 1; }
+
+      - name: Write deployment summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "## Deploy Website"
+            echo
+            echo "- Deployed SHA: ${{ steps.metadata.outputs.deployed_sha || 'not built' }}"
+            echo "- Timestamp (UTC): ${{ steps.metadata.outputs.timestamp || 'not available' }}"
+            echo "- Build: ${{ steps.artifact.outcome == 'success' && 'PASS' || 'FAIL' }}"
+            echo "- Production backup: ${{ steps.deploy.outputs.backup_path || 'not created' }}"
+            echo "- Homepage HTTP: ${{ steps.smoke.outputs.homepage_http || 'not tested' }}"
+            echo "- WWW HTTP: ${{ steps.smoke.outputs.www_http || 'not tested' }}"
+            echo "- /road-monitor HTTP: ${{ steps.smoke.outputs.road_monitor_http || 'not tested' }}"
+            echo "- /road-monitor/ HTTP: ${{ steps.smoke.outputs.road_monitor_slash_http || 'not tested' }}"
+            echo "- IoT dashboard API HTTP: ${{ steps.smoke.outputs.dashboard_api_http || 'not tested' }}"
+            echo "- Rollback: ${{ steps.rollback.outputs.rollback || 'NO' }}"
+            echo "- Final: ${{ job.status == 'success' && 'PASS' || 'FAIL' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove remote staging
+        if: ${{ always() && steps.upload.outputs.stage != '' }}
+        shell: bash
+        run: ssh website-production "rm -rf -- '${{ steps.upload.outputs.stage }}'"
+
+      - name: Remove temporary SSH credentials
+        if: ${{ always() }}
+        shell: bash
+        run: rm -f "$HOME/.ssh/id_website_deploy" "$HOME/.ssh/config" "$HOME/.ssh/known_hosts"
