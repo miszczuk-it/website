@@ -24,7 +24,11 @@ npm run lint
 npm run build
 ```
 
-Repozytorium nie zawiera konfiguracji VPS ani danych deploymentowych. Publikacja produkcyjna jest wykonywana przez osobny, prywatny proces.
+Repozytorium nie zawiera konfiguracji VPS ani danych deploymentowych. CI uruchamia
+się automatycznie, ale produkcja nie publikuje się automatycznie po merge. Aby
+opublikować stronę, wybierz **GitHub → Actions → Deploy Website → Run workflow**.
+Workflow zawsze buduje aktualny `main`, wykonuje backup, a następnie smoke test;
+w przypadku nieudanego smoke testu automatycznie przywraca backup.
 
 ## Aplikacja `app.miszczuk.it`
 
