@@ -13,3 +13,6 @@ Wszystkie istotne zmiany będą dokumentowane w tym pliku zgodnie z Semantic Ver
 ## Unreleased
 
 - Wydzielenie aplikacji WWW z repozytorium mieszającego frontend i platformę AI.
+- Dodano podstronę `/road-monitor` (projekt IoT Road Monitor): aktualne warunki, historia
+  pogodowa 24h/7 dni z wykresami, uczciwy status sekcji ruchu drogowego („w przygotowaniu"),
+  minimalny router oparty o `pathname` (bez nowej zależności routingu).
