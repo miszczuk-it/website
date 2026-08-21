@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from '../router'
 import { useDocumentMeta } from '../lib/useDocumentMeta'
 import { getCurrentStatus } from '../lib/dashboardApi'
@@ -17,6 +17,10 @@ const TECH_STACK: { name: string; status: 'operational' | 'planned' }[] = [
   { name: 'GitHub Actions', status: 'operational' },
 ]
 
+export const AUTO_REFRESH_MS = 5 * 60 * 1000
+
+type RefreshSource = 'current' | 'history'
+
 export function RoadMonitorPage() {
   useDocumentMeta(
     'IoT Road Monitor | miszczuk.it',
@@ -26,23 +30,92 @@ export function RoadMonitorPage() {
   const [status, setStatus] = useState<DashboardCurrentStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [refreshing, setRefreshing] = useState(true)
+  const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<number | null>(null)
+  const statusRef = useRef<DashboardCurrentStatus | null>(null)
+  const refreshKeyRef = useRef(0)
+  const refreshingRef = useRef(true)
+  const refreshCycleRef = useRef({ key: 0, sources: new Set<RefreshSource>(), successful: true })
+
+  const startRefresh = useCallback(() => {
+    if (refreshingRef.current || document.visibilityState !== 'visible') return
+
+    const key = refreshKeyRef.current + 1
+    refreshKeyRef.current = key
+    refreshCycleRef.current = { key, sources: new Set(), successful: true }
+    refreshingRef.current = true
+    setRefreshing(true)
+    setRefreshKey(key)
+  }, [])
+
+  const handleRefreshComplete = useCallback((source: RefreshSource, key: number, successful: boolean) => {
+    const cycle = refreshCycleRef.current
+    if (cycle.key !== key || cycle.sources.has(source)) return
+
+    cycle.sources.add(source)
+    cycle.successful &&= successful
+    if (cycle.sources.size !== 2) return
+
+    refreshingRef.current = false
+    setRefreshing(false)
+    if (cycle.successful) setLastSuccessfulRefresh(Date.now())
+  }, [])
 
   useEffect(() => {
     let cancelled = false
+    let successful = false
     getCurrentStatus()
       .then((data) => {
-        if (!cancelled) setStatus(data)
+        successful = true
+        if (!cancelled) {
+          statusRef.current = data
+          setStatus(data)
+          setError(false)
+        }
       })
       .catch(() => {
-        if (!cancelled) setError(true)
+        if (!cancelled && !statusRef.current) setError(true)
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+          handleRefreshComplete('current', refreshKey, successful)
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [handleRefreshComplete, refreshKey])
+
+  useEffect(() => {
+    const poll = () => {
+      if (document.visibilityState === 'visible') startRefresh()
+    }
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState === 'visible' &&
+        (!lastSuccessfulRefresh || Date.now() - lastSuccessfulRefresh >= AUTO_REFRESH_MS)
+      ) {
+        startRefresh()
+      }
+    }
+
+    const intervalId = window.setInterval(poll, AUTO_REFRESH_MS)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [lastSuccessfulRefresh, startRefresh])
+
+  const lastChecked = lastSuccessfulRefresh
+    ? new Date(lastSuccessfulRefresh).toLocaleTimeString('pl-PL', {
+        timeZone: 'Europe/Warsaw',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
@@ -88,15 +161,29 @@ dashboard (ta strona)`}
         </section>
 
         <section aria-labelledby="current-heading" className="mt-16">
-          <h2 id="current-heading" className="text-2xl font-bold tracking-tight text-white">
-            Aktualne warunki
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="current-heading" className="text-2xl font-bold tracking-tight text-white">
+              Aktualne warunki
+            </h2>
+            <button
+              type="button"
+              onClick={startRefresh}
+              disabled={refreshing}
+              aria-busy={refreshing}
+              className="rounded-full border border-sky-400 px-4 py-2 text-sm font-semibold text-sky-300 transition-colors hover:bg-sky-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {refreshing ? 'Odświeżanie...' : 'Odśwież'}
+            </button>
+          </div>
+          <p aria-live="polite" className="mt-2 text-sm text-slate-500">
+            {lastChecked ? `Ostatnio sprawdzono: ${lastChecked}` : 'Sprawdzanie danych...'}
+          </p>
           <div className="mt-4">
             <CurrentConditionsCard status={status} loading={loading} error={error} />
           </div>
         </section>
 
-        <WeatherHistorySection />
+        <WeatherHistorySection refreshKey={refreshKey} onRefreshComplete={handleRefreshComplete} />
 
         <TrafficSection />
 
