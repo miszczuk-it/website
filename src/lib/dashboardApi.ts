@@ -20,11 +20,16 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T
 }
 
-export function getCurrentStatus(locationId?: string): Promise<DashboardCurrentStatus> {
-  const query = locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''
+export function getCurrentStatus(locationId?: string, refresh = false): Promise<DashboardCurrentStatus> {
+  const params = new URLSearchParams()
+  if (locationId) params.set('location_id', locationId)
+  if (refresh) params.set('refresh', 'true')
+  const query = params.size > 0 ? `?${params.toString()}` : ''
   return getJson<DashboardCurrentStatus>(`/iot/v1/dashboard/current${query}`)
 }
 
-export function getWeatherHistory(hours: number): Promise<DashboardWeatherHistory> {
-  return getJson<DashboardWeatherHistory>(`/iot/v1/dashboard/weather-hourly?hours=${hours}`)
+export function getWeatherHistory(hours: number, refresh = false): Promise<DashboardWeatherHistory> {
+  const params = new URLSearchParams({ hours: String(hours) })
+  if (refresh) params.set('refresh', 'true')
+  return getJson<DashboardWeatherHistory>(`/iot/v1/dashboard/weather-hourly?${params.toString()}`)
 }

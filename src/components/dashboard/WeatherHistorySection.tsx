@@ -16,17 +16,18 @@ interface HistoryResult {
 
 interface WeatherHistorySectionProps {
   refreshKey: number
+  forceRefresh: boolean
   onRefreshComplete: (source: 'history', key: number, successful: boolean) => void
 }
 
-export function WeatherHistorySection({ refreshKey, onRefreshComplete }: WeatherHistorySectionProps) {
+export function WeatherHistorySection({ refreshKey, forceRefresh, onRefreshComplete }: WeatherHistorySectionProps) {
   const [hours, setHours] = useState<number>(24)
   const [result, setResult] = useState<HistoryResult | null>(null)
 
   useEffect(() => {
     let cancelled = false
     let successful = false
-    getWeatherHistory(hours)
+    getWeatherHistory(hours, forceRefresh)
       .then((data) => {
         successful = true
         if (!cancelled) setResult({ hours, history: data, error: false })
@@ -46,7 +47,7 @@ export function WeatherHistorySection({ refreshKey, onRefreshComplete }: Weather
     return () => {
       cancelled = true
     }
-  }, [hours, onRefreshComplete, refreshKey])
+  }, [forceRefresh, hours, onRefreshComplete, refreshKey])
 
   const loading = result === null || result.hours !== hours
   const history = !loading ? result.history : null
@@ -98,6 +99,12 @@ export function WeatherHistorySection({ refreshKey, onRefreshComplete }: Weather
       {refreshError && (
         <p role="status" className="mt-6 text-sm text-amber-200">
           Nie udało się odświeżyć danych. Wyświetlane są ostatnie dostępne dane.
+        </p>
+      )}
+
+      {!loading && history?.data_status === 'stale' && (
+        <p role="status" className="mt-6 rounded-lg border border-amber-300/40 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+          Databricks jest chwilowo niedostÄ™pny. WyĹ›wietlane sÄ… ostatnie poprawne dane.
         </p>
       )}
 
