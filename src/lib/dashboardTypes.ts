@@ -15,6 +15,9 @@ export interface DashboardCurrentStatus {
   weather_age_minutes: number
   traffic_available: boolean
   calculated_at: string
+  data_status: 'fresh' | 'stale'
+  last_databricks_success_at: string | null
+  source_data_at: string | null
 }
 
 export interface DashboardWeatherHourlyPoint {
@@ -36,4 +39,7 @@ export interface DashboardWeatherHistory {
   from: string
   to: string
   points: DashboardWeatherHourlyPoint[]
+  data_status: 'fresh' | 'stale'
+  last_databricks_success_at: string | null
+  source_data_at: string | null
 }

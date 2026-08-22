@@ -17,7 +17,7 @@ const TECH_STACK: { name: string; status: 'operational' | 'planned' }[] = [
   { name: 'GitHub Actions', status: 'operational' },
 ]
 
-export const AUTO_REFRESH_MS = 5 * 60 * 1000
+export const AUTO_REFRESH_MS = 60 * 60 * 1000
 
 type RefreshSource = 'current' | 'history'
 
@@ -31,6 +31,7 @@ export function RoadMonitorPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [forceRefresh, setForceRefresh] = useState(false)
   const [refreshing, setRefreshing] = useState(true)
   const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<number | null>(null)
   const statusRef = useRef<DashboardCurrentStatus | null>(null)
@@ -38,7 +39,7 @@ export function RoadMonitorPage() {
   const refreshingRef = useRef(true)
   const refreshCycleRef = useRef({ key: 0, sources: new Set<RefreshSource>(), successful: true })
 
-  const startRefresh = useCallback(() => {
+  const startRefresh = useCallback((force = false) => {
     if (refreshingRef.current || document.visibilityState !== 'visible') return
 
     const key = refreshKeyRef.current + 1
@@ -46,6 +47,7 @@ export function RoadMonitorPage() {
     refreshCycleRef.current = { key, sources: new Set(), successful: true }
     refreshingRef.current = true
     setRefreshing(true)
+    setForceRefresh(force)
     setRefreshKey(key)
   }, [])
 
@@ -65,7 +67,7 @@ export function RoadMonitorPage() {
   useEffect(() => {
     let cancelled = false
     let successful = false
-    getCurrentStatus()
+    getCurrentStatus(undefined, forceRefresh)
       .then((data) => {
         successful = true
         if (!cancelled) {
@@ -86,18 +88,18 @@ export function RoadMonitorPage() {
     return () => {
       cancelled = true
     }
-  }, [handleRefreshComplete, refreshKey])
+  }, [forceRefresh, handleRefreshComplete, refreshKey])
 
   useEffect(() => {
     const poll = () => {
-      if (document.visibilityState === 'visible') startRefresh()
+      if (document.visibilityState === 'visible') startRefresh(false)
     }
     const handleVisibilityChange = () => {
       if (
         document.visibilityState === 'visible' &&
         (!lastSuccessfulRefresh || Date.now() - lastSuccessfulRefresh >= AUTO_REFRESH_MS)
       ) {
-        startRefresh()
+        startRefresh(false)
       }
     }
 
@@ -156,7 +158,7 @@ dashboard (ta strona)`}
             </pre>
           </div>
           <p className="mt-3 text-sm text-slate-500">
-            Dane pogodowe są agregowane cyklicznie (co ok. 30 minut), a nie strumieniowane w czasie rzeczywistym.
+            Dane pogodowe są agregowane co godzinę, a nie strumieniowane w czasie rzeczywistym.
           </p>
         </section>
 
@@ -167,7 +169,7 @@ dashboard (ta strona)`}
             </h2>
             <button
               type="button"
-              onClick={startRefresh}
+              onClick={() => startRefresh(true)}
               disabled={refreshing}
               aria-busy={refreshing}
               className="rounded-full border border-sky-400 px-4 py-2 text-sm font-semibold text-sky-300 transition-colors hover:bg-sky-400/10 disabled:cursor-not-allowed disabled:opacity-60"
@@ -178,12 +180,17 @@ dashboard (ta strona)`}
           <p aria-live="polite" className="mt-2 text-sm text-slate-500">
             {lastChecked ? `Ostatnio sprawdzono: ${lastChecked}` : 'Sprawdzanie danych...'}
           </p>
+          {status?.data_status === 'stale' && (
+            <p role="status" className="mt-3 rounded-lg border border-amber-300/40 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+              Databricks jest chwilowo niedostÄ™pny. WyĹ›wietlane sÄ… ostatnie poprawne dane.
+            </p>
+          )}
           <div className="mt-4">
             <CurrentConditionsCard status={status} loading={loading} error={error} />
           </div>
         </section>
 
-        <WeatherHistorySection refreshKey={refreshKey} onRefreshComplete={handleRefreshComplete} />
+        <WeatherHistorySection refreshKey={refreshKey} forceRefresh={forceRefresh} onRefreshComplete={handleRefreshComplete} />
 
         <TrafficSection />
 
