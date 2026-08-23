@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RoadMonitorPage } from './RoadMonitorPage'
 import * as dashboardApi from '../lib/dashboardApi'
-import type { DashboardCurrentStatus, DashboardWeatherHistory } from '../lib/dashboardTypes'
+import type { DashboardCurrentStatus, DashboardDeviceStatus, DashboardWeatherHistory } from '../lib/dashboardTypes'
 
 vi.mock('../lib/dashboardApi')
 
@@ -37,10 +37,18 @@ const history: DashboardWeatherHistory = {
   source_data_at: '2026-08-23T11:00:00Z',
 }
 
+const deviceStatus: DashboardDeviceStatus = {
+  device_id: 'road-001',
+  online: true,
+  last_telemetry_received_at: '2026-08-23T11:04:00Z',
+}
+
 describe('RoadMonitorPage manual refresh', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.mocked(dashboardApi.getCurrentStatus).mockResolvedValue(status)
     vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
+    vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
   })
 
   it('calls getCurrentStatus with refresh=true when the Refresh button is clicked', async () => {
@@ -55,5 +63,20 @@ describe('RoadMonitorPage manual refresh', () => {
 
     await waitFor(() => expect(dashboardApi.getCurrentStatus).toHaveBeenCalledTimes(2))
     expect(dashboardApi.getCurrentStatus).toHaveBeenLastCalledWith(undefined, true)
+  })
+
+  it('never renders a relative-age label like "min temu" anywhere on the page', async () => {
+    render(<RoadMonitorPage />)
+
+    await waitFor(() => expect(dashboardApi.getCurrentStatus).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText(/Ostatnia aktualizacja:/)).toBeInTheDocument()
+    expect(screen.queryByText(/temu/)).not.toBeInTheDocument()
+  })
+
+  it('polls getDeviceStatus independently of getCurrentStatus and shows the ONLINE badge', async () => {
+    render(<RoadMonitorPage />)
+
+    await waitFor(() => expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('ESP ONLINE')).toBeInTheDocument()
   })
 })

@@ -57,6 +57,12 @@ export function WeatherHistorySection({ refreshKey, forceRefresh, onRefreshCompl
   const temperaturePoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.temperature_avg_c }))
   const pressurePoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.pressure_avg_hpa }))
   const humidityPoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.humidity_avg_pct }))
+  const localTemperaturePoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.local_temperature_avg_c }))
+  const temperatureDeltaPoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.temperature_delta_avg_c }))
+  const localHumidityPoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.local_humidity_avg_pct }))
+  const humidityDeltaPoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.humidity_delta_avg_pp }))
+  const localPressurePoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.local_pressure_avg_hpa }))
+  const localLightPoints = points.map((p) => ({ x: new Date(p.observation_hour), y: p.local_light_avg_lux }))
 
   return (
     <section aria-labelledby="history-heading" className="mt-16">
@@ -127,9 +133,42 @@ export function WeatherHistorySection({ refreshKey, forceRefresh, onRefreshCompl
           )}
 
           <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <LineChart title="Temperatura" unit=" °C" points={temperaturePoints} color="#f97316" />
-            <LineChart title="Ciśnienie" unit=" hPa" points={pressurePoints} color="#38bdf8" formatValue={(v) => v.toFixed(0)} />
-            <LineChart title="Wilgotność" unit=" %" points={humidityPoints} color="#a78bfa" formatValue={(v) => v.toFixed(0)} />
+            <LineChart
+              title="Temperatura"
+              unit=" °C"
+              points={temperaturePoints}
+              color="#f97316"
+              primaryLabel="WeatherAPI"
+              secondary={{ label: 'Lokalnie', points: localTemperaturePoints }}
+              deltaPoints={temperatureDeltaPoints}
+            />
+            <LineChart
+              title="Ciśnienie"
+              unit=" hPa"
+              points={pressurePoints}
+              color="#38bdf8"
+              formatValue={(v) => v.toFixed(0)}
+              primaryLabel="WeatherAPI"
+              secondary={{ label: 'Lokalnie', points: localPressurePoints }}
+            />
+            <LineChart
+              title="Wilgotność"
+              unit=" %"
+              points={humidityPoints}
+              color="#a78bfa"
+              formatValue={(v) => v.toFixed(0)}
+              primaryLabel="WeatherAPI"
+              secondary={{ label: 'Lokalnie', points: localHumidityPoints }}
+              deltaPoints={humidityDeltaPoints}
+              deltaUnit=" pp"
+            />
+            <LineChart
+              title="Światło (lokalnie)"
+              unit=" lux"
+              points={localLightPoints}
+              color="#facc15"
+              formatValue={(v) => new Intl.NumberFormat('pl-PL').format(Math.round(v))}
+            />
           </div>
         </>
       )}

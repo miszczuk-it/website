@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from '../router'
 import { useDocumentMeta } from '../lib/useDocumentMeta'
-import { getCurrentStatus } from '../lib/dashboardApi'
-import type { DashboardCurrentStatus } from '../lib/dashboardTypes'
+import { getCurrentStatus, getDeviceStatus } from '../lib/dashboardApi'
+import type { DashboardCurrentStatus, DashboardDeviceStatus } from '../lib/dashboardTypes'
 import { CurrentConditionsCard } from '../components/dashboard/CurrentConditionsCard'
 import { WeatherHistorySection } from '../components/dashboard/WeatherHistorySection'
 import { TrafficSection } from '../components/dashboard/TrafficSection'
+
+// M5.7: device status is polled far more often than the Databricks-backed dashboard refresh
+// (AUTO_REFRESH_MS below) -- it reads live from Postgres, not from the hourly-batched GOLD
+// pipeline, so a 60-minute cadence would defeat its purpose for a device that POSTs every 5
+// minutes. This interval is intentionally independent of AUTO_REFRESH_MS.
+export const DEVICE_STATUS_POLL_MS = 60 * 1000
 
 const TECH_STACK: { name: string; status: 'operational' | 'planned' }[] = [
   { name: 'ESP32', status: 'planned' },
@@ -30,6 +36,8 @@ export function RoadMonitorPage() {
   const [status, setStatus] = useState<DashboardCurrentStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [deviceStatus, setDeviceStatus] = useState<DashboardDeviceStatus | null>(null)
+  const [deviceStatusError, setDeviceStatusError] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [forceRefresh, setForceRefresh] = useState(false)
   const [refreshing, setRefreshing] = useState(true)
@@ -111,6 +119,36 @@ export function RoadMonitorPage() {
     }
   }, [lastSuccessfulRefresh, startRefresh])
 
+  useEffect(() => {
+    let cancelled = false
+    const fetchDeviceStatus = () => {
+      getDeviceStatus()
+        .then((data) => {
+          if (!cancelled) {
+            setDeviceStatus(data)
+            setDeviceStatusError(false)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setDeviceStatusError(true)
+        })
+    }
+
+    fetchDeviceStatus()
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') fetchDeviceStatus()
+    }, DEVICE_STATUS_POLL_MS)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') fetchDeviceStatus()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
+
   const lastChecked = lastSuccessfulRefresh
     ? new Date(lastSuccessfulRefresh).toLocaleTimeString('pl-PL', {
         timeZone: 'Europe/Warsaw',
@@ -186,7 +224,13 @@ dashboard (ta strona)`}
             </p>
           )}
           <div className="mt-4">
-            <CurrentConditionsCard status={status} loading={loading} error={error} />
+            <CurrentConditionsCard
+              status={status}
+              loading={loading}
+              error={error}
+              deviceStatus={deviceStatus}
+              deviceStatusError={deviceStatusError}
+            />
           </div>
         </section>
 

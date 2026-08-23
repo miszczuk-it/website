@@ -38,6 +38,9 @@ export interface DashboardCurrentStatus {
   source_data_at: string | null
 }
 
+// M5.7: hourly LOCAL aggregates + GOLD-computed deltas, joined server-side by hour onto the
+// WeatherAPI point. All seven are absent together for any hour with no matching LOCAL row.
+// There is no pressure delta field: GOLD never computes one (see dashboardApi.ts docs).
 export interface DashboardWeatherHourlyPoint {
   observation_hour: string
   temperature_avg_c: number
@@ -50,6 +53,22 @@ export interface DashboardWeatherHourlyPoint {
   visibility_avg_km: number
   condition_text: string | null
   source_row_count: number
+  local_temperature_avg_c: number | null
+  temperature_delta_avg_c: number | null
+  local_humidity_avg_pct: number | null
+  humidity_delta_avg_pp: number | null
+  local_pressure_avg_hpa: number | null
+  local_light_avg_lux: number | null
+  local_sample_count: number | null
+}
+
+// M5.7: GET /iot/v1/dashboard/device-status -- independent of DashboardCurrentStatus, polled on
+// its own fast interval (see RoadMonitorPage.tsx). Sourced live from PostgreSQL telemetry_raw,
+// never Databricks, never cached.
+export interface DashboardDeviceStatus {
+  device_id: string
+  online: boolean
+  last_telemetry_received_at: string | null
 }
 
 export interface DashboardWeatherHistory {
