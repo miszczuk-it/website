@@ -1,10 +1,14 @@
-import type { DashboardCurrentStatus, DashboardLocalComparison } from '../../lib/dashboardTypes'
+import type { DashboardCurrentStatus, DashboardDeviceStatus, DashboardLocalComparison } from '../../lib/dashboardTypes'
+import { formatDateTime } from '../../lib/format'
 import { LocalWeatherComparison } from './LocalWeatherComparison'
+import { DeviceStatusBadge } from './DeviceStatusBadge'
 
 interface CurrentConditionsCardProps {
   status: DashboardCurrentStatus | null
   loading: boolean
   error: boolean
+  deviceStatus: DashboardDeviceStatus | null
+  deviceStatusError: boolean
 }
 
 // Normalized once, here, at the single point local_comparison enters the render tree -- an
@@ -23,24 +27,6 @@ const EMPTY_LOCAL_COMPARISON: DashboardLocalComparison = {
   local_observed_at: null,
 }
 
-function formatRelativeMinutes(minutes: number): string {
-  if (minutes < 1) return 'przed chwilą'
-  if (minutes < 60) return `${minutes} min temu`
-  const hours = Math.floor(minutes / 60)
-  return `${hours} godz. temu`
-}
-
-function formatObservedAt(iso: string): string {
-  return new Date(iso).toLocaleString('pl-PL', {
-    timeZone: 'Europe/Warsaw',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3">
@@ -50,7 +36,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function CurrentConditionsCard({ status, loading, error }: CurrentConditionsCardProps) {
+export function CurrentConditionsCard({ status, loading, error, deviceStatus, deviceStatusError }: CurrentConditionsCardProps) {
   if (loading) {
     return (
       <div role="status" className="rounded-xl border border-slate-800 bg-slate-900/40 p-6 text-slate-300">
@@ -73,7 +59,10 @@ export function CurrentConditionsCard({ status, loading, error }: CurrentConditi
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-lg font-semibold text-white">Aktualne warunki — {status.location_id}</h3>
-        {weather.condition_text && <span className="text-sm text-sky-400">{weather.condition_text}</span>}
+        <div className="flex items-center gap-2">
+          {weather.condition_text && <span className="text-sm text-sky-400">{weather.condition_text}</span>}
+          <DeviceStatusBadge status={deviceStatus} error={deviceStatusError} />
+        </div>
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -85,9 +74,7 @@ export function CurrentConditionsCard({ status, loading, error }: CurrentConditi
         <Metric label="Widoczność" value={`${weather.visibility_km} km`} />
       </dl>
 
-      <p className="mt-4 text-sm text-slate-400">
-        Ostatnia aktualizacja: {formatObservedAt(status.weather_observed_at)} ({formatRelativeMinutes(status.weather_age_minutes)})
-      </p>
+      <p className="mt-4 text-sm text-slate-400">Ostatnia aktualizacja: {formatDateTime(status.weather_observed_at)}</p>
 
       <LocalWeatherComparison comparison={status.local_comparison ?? EMPTY_LOCAL_COMPARISON} weather={weather} />
     </div>

@@ -1,4 +1,4 @@
-import type { DashboardCurrentStatus, DashboardWeatherHistory } from './dashboardTypes'
+import type { DashboardCurrentStatus, DashboardDeviceStatus, DashboardWeatherHistory } from './dashboardTypes'
 
 const API_BASE_URL = import.meta.env.VITE_IOT_API_URL ?? 'https://api.miszczuk.it'
 
@@ -32,4 +32,13 @@ export function getWeatherHistory(hours: number, refresh = false): Promise<Dashb
   const params = new URLSearchParams({ hours: String(hours) })
   if (refresh) params.set('refresh', 'true')
   return getJson<DashboardWeatherHistory>(`/iot/v1/dashboard/weather-hourly?${params.toString()}`)
+}
+
+// M5.7: independent of getCurrentStatus/getWeatherHistory -- no `refresh` param, this endpoint is
+// never cached server-side, and it's polled on its own fast interval (see RoadMonitorPage.tsx).
+export function getDeviceStatus(deviceId?: string): Promise<DashboardDeviceStatus> {
+  const params = new URLSearchParams()
+  if (deviceId) params.set('device_id', deviceId)
+  const query = params.size > 0 ? `?${params.toString()}` : ''
+  return getJson<DashboardDeviceStatus>(`/iot/v1/dashboard/device-status${query}`)
 }

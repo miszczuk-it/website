@@ -16,3 +16,8 @@ Wszystkie istotne zmiany będą dokumentowane w tym pliku zgodnie z Semantic Ver
 - Dodano podstronę `/road-monitor` (projekt IoT Road Monitor): aktualne warunki, historia
   pogodowa 24h/7 dni z wykresami, uczciwy status sekcji ruchu drogowego („w przygotowaniu"),
   minimalny router oparty o `pathname` (bez nowej zależności routingu).
+- M5.7: dodano status urządzenia ESP (badge ONLINE/OFFLINE, odpytywany niezależnie co ok. 60s z
+  osobnego, nieprzepuszczanego przez cache endpointu), historię LOCAL/WeatherAPI/DELTA dla
+  temperatury, wilgotności i ciśnienia oraz osobny wykres historii światła (LOCAL only); usunięto
+  mylący, nieodświeżający się tekst „x min temu” z ostatniej aktualizacji — pozostał wyłącznie
+  bezwzględny znacznik czasu.
