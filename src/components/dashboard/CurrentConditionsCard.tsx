@@ -1,9 +1,26 @@
-import type { DashboardCurrentStatus } from '../../lib/dashboardTypes'
+import type { DashboardCurrentStatus, DashboardLocalComparison } from '../../lib/dashboardTypes'
+import { LocalWeatherComparison } from './LocalWeatherComparison'
 
 interface CurrentConditionsCardProps {
   status: DashboardCurrentStatus | null
   loading: boolean
   error: boolean
+}
+
+// Normalized once, here, at the single point local_comparison enters the render tree -- an
+// API response from before this field's rollout omits it entirely (see dashboardTypes.ts).
+const EMPTY_LOCAL_COMPARISON: DashboardLocalComparison = {
+  local_temperature_c: null,
+  api_temperature_c: null,
+  temperature_delta_c: null,
+  local_humidity_percent: null,
+  api_humidity_percent: null,
+  humidity_delta_pp: null,
+  local_pressure_hpa: null,
+  api_pressure_hpa: null,
+  light_lux: null,
+  cloud_percent: null,
+  local_observed_at: null,
 }
 
 function formatRelativeMinutes(minutes: number): string {
@@ -71,6 +88,8 @@ export function CurrentConditionsCard({ status, loading, error }: CurrentConditi
       <p className="mt-4 text-sm text-slate-400">
         Ostatnia aktualizacja: {formatObservedAt(status.weather_observed_at)} ({formatRelativeMinutes(status.weather_age_minutes)})
       </p>
+
+      <LocalWeatherComparison comparison={status.local_comparison ?? EMPTY_LOCAL_COMPARISON} weather={weather} />
     </div>
   )
 }
