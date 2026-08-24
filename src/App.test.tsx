@@ -50,12 +50,13 @@ describe('public routes', () => {
     vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
   })
 
-  it('renders the restored landing page at / with a Road Monitor link and no dashboard requests', () => {
+  it('renders the personal portfolio at / with a Road Monitor link and no dashboard requests', () => {
     window.history.replaceState({}, '', '/')
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'Nowa wersja strony jest w przygotowaniu.' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Zobacz projekt: IoT Road Monitor/ })).toHaveAttribute('href', '/road-monitor')
+    expect(screen.getByRole('heading', { name: 'Andrzej Miszczuk' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'IoT Road Monitor' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Zobacz dashboard IoT Road Monitor/ })).toHaveAttribute('href', '/road-monitor')
     expect(dashboardApi.getCurrentStatus).not.toHaveBeenCalled()
     expect(dashboardApi.getWeatherHistory).not.toHaveBeenCalled()
     expect(dashboardApi.getDeviceStatus).not.toHaveBeenCalled()
@@ -68,5 +69,13 @@ describe('public routes', () => {
     expect(screen.getByRole('heading', { name: 'IoT Road Monitor' })).toBeInTheDocument()
     await waitFor(() => expect(dashboardApi.getCurrentStatus).toHaveBeenCalledOnce())
     expect(dashboardApi.getDeviceStatus).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the existing fallback behavior for an unknown path', () => {
+    window.history.replaceState({}, '', '/nieznana-trasa')
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'Andrzej Miszczuk' })).toBeInTheDocument()
+    expect(dashboardApi.getCurrentStatus).not.toHaveBeenCalled()
   })
 })
