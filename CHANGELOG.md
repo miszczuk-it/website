@@ -12,6 +12,8 @@ Wszystkie istotne zmiany będą dokumentowane w tym pliku zgodnie z Semantic Ver
 
 ## Unreleased
 
+- Przebudowano stronę główną na osobiste portfolio projektowe: profil zawodowy, kompetencje,
+  projekty IoT Road Monitor, KSC/NIS2 i AI Platform oraz nawigację sekcyjną.
 - Wydzielenie aplikacji WWW z repozytorium mieszającego frontend i platformę AI.
 - Dodano podstronę `/road-monitor` (projekt IoT Road Monitor): aktualne warunki, historia
   pogodowa 24h/7 dni z wykresami, uczciwy status sekcji ruchu drogowego („w przygotowaniu"),
