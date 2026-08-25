@@ -69,6 +69,9 @@ export type ExecutionStatusResponse = {
   totalTokens: number | null
   actualCost: number | null
   currency: string | null
+  isIncomplete: boolean
+  incompleteReason: string | null
+  fallbackUsed: boolean
   retryAllowed: boolean
   reconcileRequired: boolean
   safeErrorCode: string | null
