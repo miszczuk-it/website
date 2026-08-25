@@ -5,6 +5,7 @@ import { getCurrentStatus, getDeviceStatus } from '../lib/dashboardApi'
 import type { DashboardCurrentStatus, DashboardDeviceStatus } from '../lib/dashboardTypes'
 import { CurrentConditionsCard } from '../components/dashboard/CurrentConditionsCard'
 import { WeatherHistorySection } from '../components/dashboard/WeatherHistorySection'
+import { DeviceActivitySection } from '../components/dashboard/DeviceActivitySection'
 import { TrafficSection } from '../components/dashboard/TrafficSection'
 
 // M5.7: device status is polled far more often than the Databricks-backed dashboard refresh
@@ -14,7 +15,7 @@ import { TrafficSection } from '../components/dashboard/TrafficSection'
 export const DEVICE_STATUS_POLL_MS = 60 * 1000
 
 const TECH_STACK: { name: string; status: 'operational' | 'planned' }[] = [
-  { name: 'ESP32', status: 'planned' },
+  { name: 'ESP32', status: 'operational' },
   { name: 'ASP.NET Core', status: 'operational' },
   { name: 'PostgreSQL', status: 'operational' },
   { name: 'n8n', status: 'operational' },
@@ -25,7 +26,7 @@ const TECH_STACK: { name: string; status: 'operational' | 'planned' }[] = [
 
 export const AUTO_REFRESH_MS = 60 * 60 * 1000
 
-type RefreshSource = 'current' | 'history'
+type RefreshSource = 'current' | 'history' | 'activity'
 
 export function RoadMonitorPage() {
   useDocumentMeta(
@@ -65,7 +66,7 @@ export function RoadMonitorPage() {
 
     cycle.sources.add(source)
     cycle.successful &&= successful
-    if (cycle.sources.size !== 2) return
+    if (cycle.sources.size !== 3) return
 
     refreshingRef.current = false
     setRefreshing(false)
@@ -177,7 +178,7 @@ export function RoadMonitorPage() {
           </h2>
           <div className="mt-4 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/40 p-4">
             <pre className="whitespace-pre text-sm leading-6 text-slate-300">
-{`ESP32 / czujniki (planned)
+{`ESP32 / czujniki środowiskowe (produkcyjnie aktywne)
       │
       ▼
 IoT API (ASP.NET Core)
@@ -235,6 +236,8 @@ dashboard (ta strona)`}
         </section>
 
         <WeatherHistorySection refreshKey={refreshKey} forceRefresh={forceRefresh} onRefreshComplete={handleRefreshComplete} />
+
+        <DeviceActivitySection refreshKey={refreshKey} onRefreshComplete={handleRefreshComplete} />
 
         <TrafficSection />
 

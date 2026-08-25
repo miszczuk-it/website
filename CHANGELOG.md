@@ -23,3 +23,9 @@ Wszystkie istotne zmiany będą dokumentowane w tym pliku zgodnie z Semantic Ver
   temperatury, wilgotności i ciśnienia oraz osobny wykres historii światła (LOCAL only); usunięto
   mylący, nieodświeżający się tekst „x min temu” z ostatniej aktualizacji — pozostał wyłącznie
   bezwzględny znacznik czasu.
+- M5.8: usunięto nieaktualne komunikaty sugerujące, że ESP32 dopiero czeka na wdrożenie (czujnik
+  środowiskowy działa produkcyjnie); status sekcji ruchu drogowego pozostaje jednoznacznie
+  „Radar: w przygotowaniu”, oddzielony od statusu ESP32. Dodano wykres słupkowy „Transmisje ESP” —
+  liczbę poprawnie przyjętych transmisji telemetrycznych na godzinę (ostatnie 24h, źródło: live
+  PostgreSQL `telemetry_raw`, bez udziału Databricks), z zerowanymi (nie pomijanymi) godzinami bez
+  transmisji, wyróżnieniem bieżącej niepełnej godziny i tabelą danych dla dostępności.

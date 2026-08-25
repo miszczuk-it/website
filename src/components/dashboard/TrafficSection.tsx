@@ -6,13 +6,14 @@ export function TrafficSection() {
           Pomiar ruchu drogowego
         </h2>
         <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-300">
-          Hardware integration: pending
+          Radar: w przygotowaniu
         </span>
       </div>
 
       <p className="mt-4 max-w-2xl text-slate-300">
         Integracja urządzenia radarowego jest w przygotowaniu. Po uruchomieniu czujnika ta sekcja będzie prezentować
-        natężenie ruchu i prędkość pojazdów w czasie rzeczywistym.
+        natężenie ruchu i prędkość pojazdów w czasie rzeczywistym. Czujnik środowiskowy ESP32 (temperatura,
+        wilgotność, ciśnienie, światło) działa już produkcyjnie — patrz sekcje powyżej.
       </p>
     </section>
   )

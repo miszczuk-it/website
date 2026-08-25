@@ -80,3 +80,20 @@ export interface DashboardWeatherHistory {
   last_databricks_success_at: string | null
   source_data_at: string | null
 }
+
+// M5.8: GET /iot/v1/dashboard/device-activity-hourly -- independent of DashboardWeatherHistory,
+// same live-Postgres/no-cache rationale as DashboardDeviceStatus. One point per requested hour,
+// zero-filled for an hour with no accepted telemetry upload (never omitted). upload_count counts
+// accepted POST /iot/v1/telemetry requests persisted to telemetry_raw -- never a raw HTTP/TCP
+// connection count.
+export interface DashboardDeviceActivityHourlyPoint {
+  hour_start: string
+  upload_count: number
+}
+
+export interface DashboardDeviceActivityHourly {
+  device_id: string
+  from: string
+  to: string
+  points: DashboardDeviceActivityHourlyPoint[]
+}
