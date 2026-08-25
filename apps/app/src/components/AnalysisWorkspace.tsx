@@ -58,6 +58,7 @@ export function ExecutionStatusPanel({ executionStatus, retrying, onRetry }: Exe
         <dt>Zaktualizowano</dt><dd>{s.updatedAt}</dd>
       </dl>
       <p role="status" className={`status status-${s.status.toLowerCase()}`}>{EXECUTION_STATUS_MESSAGES[s.status] ?? s.status}</p>
+      {s.isIncomplete && <p role="alert">Odpowiedź została przerwana przed zakończeniem{ s.incompleteReason ? ` (${s.incompleteReason})` : '' }.</p>}
       {s.status === 'FAILED_FINAL' && <p role="alert">{s.safeErrorMessage ?? DEFAULT_FAILED_FINAL_MESSAGE}</p>}
       {s.retryAllowed && (
         <button className="primary" type="button" onClick={onRetry} disabled={retrying}>

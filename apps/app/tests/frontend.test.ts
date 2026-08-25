@@ -65,6 +65,7 @@ const BASE_EXECUTION_STATUS: ExecutionStatusResponse = {
   attemptId: null, attemptNumber: null, attemptStatus: null, providerRequestId: null,
   provider: null, model: null, workflowExecutionId: null, inputTokens: null, outputTokens: null,
   cachedInputTokens: null, totalTokens: null, actualCost: null, currency: null,
+  isIncomplete: false, incompleteReason: null, fallbackUsed: false,
   retryAllowed: false, reconcileRequired: false, safeErrorCode: null, safeErrorMessage: null,
   updatedAt: '2026-01-01T00:00:00.000Z',
 }
