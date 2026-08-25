@@ -320,6 +320,24 @@ test('ExecutionStatusPanel shows cached tokens when present', () => {
   assert.ok(html.includes('64'))
 })
 
+test('ExecutionStatusPanel warns about incomplete responses while retaining result details', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: { ...BASE_EXECUTION_STATUS, status: 'LLM_RESULT_READY', isIncomplete: true, incompleteReason: 'max_output_tokens', model: 'gpt-5.6-luna' },
+    retrying: false, onRetry: () => {},
+  }))
+  assert.ok(html.includes('role="alert"'))
+  assert.ok(html.includes('Odpowied'))
+  assert.ok(html.includes('max_output_tokens'))
+  assert.ok(html.includes('gpt-5.6-luna'))
+})
+
+test('ExecutionStatusPanel hides the incomplete-response warning for complete responses', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
+    executionStatus: { ...BASE_EXECUTION_STATUS, isIncomplete: false }, retrying: false, onRetry: () => {},
+  }))
+  assert.equal(html.includes('Odpowied'), false)
+})
+
 test('ExecutionStatusPanel shows a retry button only when retryAllowed is true (FAILED_RETRYABLE)', () => {
   const html = renderToStaticMarkup(createElement(ExecutionStatusPanel, {
     executionStatus: { ...BASE_EXECUTION_STATUS, status: 'FAILED_RETRYABLE', retryAllowed: true }, retrying: false, onRetry: () => {},
