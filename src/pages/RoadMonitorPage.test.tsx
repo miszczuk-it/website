@@ -3,7 +3,12 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RoadMonitorPage } from './RoadMonitorPage'
 import * as dashboardApi from '../lib/dashboardApi'
-import type { DashboardCurrentStatus, DashboardDeviceStatus, DashboardWeatherHistory } from '../lib/dashboardTypes'
+import type {
+  DashboardCurrentStatus,
+  DashboardDeviceActivityHourly,
+  DashboardDeviceStatus,
+  DashboardWeatherHistory,
+} from '../lib/dashboardTypes'
 
 vi.mock('../lib/dashboardApi')
 
@@ -43,12 +48,20 @@ const deviceStatus: DashboardDeviceStatus = {
   last_telemetry_received_at: '2026-08-23T11:04:00Z',
 }
 
+const activity: DashboardDeviceActivityHourly = {
+  device_id: 'road-001',
+  from: '2026-08-22T11:00:00Z',
+  to: '2026-08-23T11:00:00Z',
+  points: [],
+}
+
 describe('RoadMonitorPage manual refresh', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(dashboardApi.getCurrentStatus).mockResolvedValue(status)
     vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
     vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
+    vi.mocked(dashboardApi.getDeviceActivityHourly).mockResolvedValue(activity)
   })
 
   it('calls getCurrentStatus with refresh=true when the Refresh button is clicked', async () => {
