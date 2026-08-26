@@ -1,12 +1,21 @@
 import { PlatformApiError } from './safe-error.js'
 import type {
   ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionEnvelope, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
-  ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionResponse, TaskResponse,
+  AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionListItem, SessionResponse, TaskResponse,
 } from '../types.js'
 
 type FetchLike = typeof fetch
 
 export type PlatformApiClient = {
+  authMe(correlationId: string): Promise<AuthMeResponse>
+  devLogin(role: EffectiveRole, correlationId: string): Promise<AuthMeResponse>
+  logout(correlationId: string): Promise<void>
+  listSessionsOwnedByMe(correlationId: string): Promise<SessionListItem[]>
+  getSession(sessionId: string, correlationId: string): Promise<SessionListItem>
+  listSessionTasks(sessionId: string, correlationId: string): Promise<TaskResponse[]>
+  getTask(taskId: string, correlationId: string): Promise<TaskResponse>
+  listTaskExecutions(taskId: string, correlationId: string): Promise<ExecutionResponse[]>
+  answerExecutionQuestion(executionId: string, expectedRevision: number, questionId: string, answer: string, idempotencyKey: string, correlationId: string): Promise<ExecutionStatusResponse>
   createProject(name: string, description: string, correlationId: string): Promise<ProjectResponse>
   createSession(projectId: string, correlationId: string): Promise<SessionResponse>
   startSession(sessionId: string, expectedRevision: number, correlationId: string): Promise<SessionResponse>
@@ -37,6 +46,14 @@ function normalizeBaseUrl(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function assertAuthMe(value: unknown): AuthMeResponse {
+  if (!isRecord(value) || value.contractVersion !== '1.0' || typeof value.userId !== 'string'
+    || typeof value.displayName !== 'string' || typeof value.effectiveRole !== 'string' || !Array.isArray(value.permissions)) {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as AuthMeResponse
 }
 
 function assertResponse(value: unknown, kind: 'project' | 'session' | 'task' | 'execution' | 'executionStatus') {
@@ -106,7 +123,7 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const response = await fetchImpl(`${normalizedBaseUrl}${path}`, {
-        method, signal: controller.signal,
+        method, signal: controller.signal, credentials: 'include',
         headers: { 'content-type': 'application/json', 'x-correlation-id': correlationId, 'x-request-id': createId() },
         ...(body ? { body: JSON.stringify(body) } : {}),
       })
@@ -145,6 +162,17 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
   }
 
   return {
+    authMe: (correlationId) => callValidated('GET', '/auth/me', null, correlationId, assertAuthMe),
+    devLogin: (role, correlationId) => callValidated('POST', '/auth/dev-login', { contractVersion: '1.0', role }, correlationId, assertAuthMe),
+    logout: async (correlationId) => { await fetchJson('POST', '/auth/logout', { contractVersion: '1.0' }, correlationId) },
+    listSessionsOwnedByMe: (correlationId) => callList('/sessions?ownerId=me', correlationId, (value) => assertResponse(value, 'session') as unknown as SessionListItem),
+    getSession: (sessionId, correlationId) => callValidated('GET', `/sessions/${sessionId}`, null, correlationId, (value) => assertResponse(value, 'session') as unknown as SessionListItem),
+    listSessionTasks: (sessionId, correlationId) => callList(`/sessions/${sessionId}/tasks`, correlationId, (value) => assertResponse(value, 'task') as unknown as TaskResponse),
+    getTask: (taskId, correlationId) => call('GET', `/tasks/${taskId}`, null, correlationId, 'task'),
+    listTaskExecutions: (taskId, correlationId) => callList(`/tasks/${taskId}/executions`, correlationId, (value) => assertResponse(value, 'execution') as unknown as ExecutionResponse),
+    answerExecutionQuestion: (executionId, expectedRevision, questionId, answer, idempotencyKey, correlationId) => call('POST', `/executions/${executionId}/answer`, {
+      contractVersion: '1.0', expectedRevision, questionId, answer, idempotencyKey,
+    }, correlationId, 'executionStatus'),
     createProject: (name, description, correlationId) => call('POST', '/projects', { contractVersion: '1.0', name, description }, correlationId, 'project'),
     createSession: (projectId, correlationId) => call('POST', `/projects/${projectId}/sessions`, { contractVersion: '1.0' }, correlationId, 'session'),
     startSession: (sessionId, expectedRevision, correlationId) => call('POST', `/sessions/${sessionId}/start`, { contractVersion: '1.0', expectedRevision }, correlationId, 'session'),

@@ -61,7 +61,7 @@ const BASE_DECISION_ENVELOPE: ArtifactReviewDecisionEnvelope = {
 const REVISION_EXECUTION_ID = '00000000-0000-4000-8000-000000000009'
 
 const BASE_EXECUTION_STATUS: ExecutionStatusResponse = {
-  contractVersion: '1.0', executionId: EXECUTION_ID, status: 'WAITING_FOR_LLM_GATEWAY',
+  contractVersion: '1.0', executionId: EXECUTION_ID, status: 'WAITING_FOR_LLM_GATEWAY', revision: 2,
   attemptId: null, attemptNumber: null, attemptStatus: null, providerRequestId: null,
   provider: null, model: null, workflowExecutionId: null, inputTokens: null, outputTokens: null,
   cachedInputTokens: null, totalTokens: null, actualCost: null, currency: null,
@@ -72,6 +72,15 @@ const BASE_EXECUTION_STATUS: ExecutionStatusResponse = {
 
 function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformApiClient {
   return {
+    authMe: async () => ({ contractVersion: '1.0', userId: 'usr_owner', displayName: 'Owner', effectiveRole: 'OWNER', permissions: [] }),
+    devLogin: async (role) => ({ contractVersion: '1.0', userId: `usr_${role.toLowerCase()}`, displayName: role, effectiveRole: role, permissions: [] }),
+    logout: async () => undefined,
+    listSessionsOwnedByMe: async () => [{ contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, ownerId: 'usr_owner', status: 'ACTIVE', revision: 1, createdAt: '2026-08-26T09:00:00Z' }],
+    getSession: async () => ({ contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, ownerId: 'usr_owner', status: 'ACTIVE', revision: 1, createdAt: '2026-08-26T09:00:00Z' }),
+    listSessionTasks: async () => [{ contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, status: 'READY', revision: 1 }],
+    getTask: async () => ({ contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, status: 'READY', revision: 1 }),
+    listTaskExecutions: async () => [{ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }],
+    answerExecutionQuestion: async () => BASE_EXECUTION_STATUS,
     createProject: async () => ({ contractVersion: '1.0', projectId: PROJECT_ID, status: 'ACTIVE', revision: 0 }),
     createSession: async () => ({ contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, status: 'CREATED', revision: 0 }),
     startSession: async () => ({ contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, status: 'ACTIVE', revision: 1 }),

@@ -1,5 +1,7 @@
 import { PlatformApiError } from './safe-error.js'
-import type { ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, EffectiveRole, ExecutionStatusResponse, SessionListItem, SessionResponse } from '../types.js'
+import { createPlatformApiClient, type PlatformApiClient } from './platform-api.js'
+import { EXECUTION_POLLING_STATUSES, trackExecutionStatus } from './execution-flow.js'
+import type { ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, EffectiveRole, ExecutionStatusResponse, SessionListItem } from '../types.js'
 
 export type Vs1Detail = {
   session: SessionListItem
@@ -47,7 +49,7 @@ export function createMockVs1Service(): Vs1Service {
       const executionId = `exe_${id.slice(4)}`
       return refresh({
         session: { contractVersion: '1.0', sessionId: id, projectId: `prj_${id.slice(4)}`, ownerId: current.userId, status: 'ACTIVE', revision: 1, createdAt: new Date().toISOString() },
-        execution: { contractVersion: '1.0', executionId, status: 'WAITING_FOR_USER_INPUT', attemptId: null, attemptNumber: null, attemptStatus: null, providerRequestId: null, provider: null, model: null, workflowExecutionId: null, inputTokens: null, outputTokens: null, cachedInputTokens: null, totalTokens: null, actualCost: null, currency: null, isIncomplete: false, incompleteReason: null, fallbackUsed: false, retryAllowed: false, reconcileRequired: false, safeErrorCode: null, safeErrorMessage: null, updatedAt: new Date().toISOString(), pendingQuestion: { questionId: 'q_1', prompt: `Jaki jest oczekiwany zakres dla: ${input.goal}?`, inputSchema: null } }, executionRevision: 1,
+        execution: { contractVersion: '1.0', executionId, status: 'WAITING_FOR_USER_INPUT', revision: 1, attemptId: null, attemptNumber: null, attemptStatus: null, providerRequestId: null, provider: null, model: null, workflowExecutionId: null, inputTokens: null, outputTokens: null, cachedInputTokens: null, totalTokens: null, actualCost: null, currency: null, isIncomplete: false, incompleteReason: null, fallbackUsed: false, retryAllowed: false, reconcileRequired: false, safeErrorCode: null, safeErrorMessage: null, updatedAt: new Date().toISOString(), pendingQuestion: { questionId: 'q_1', prompt: `Jaki jest oczekiwany zakres dla: ${input.goal}?`, inputSchema: null } }, executionRevision: 1,
         artifact: null, versions: [],
       })
     },
@@ -59,7 +61,7 @@ export function createMockVs1Service(): Vs1Service {
       if (!answer.trim() || detail.execution.pendingQuestion?.questionId !== questionId) error('VALIDATION_ERROR')
       const artifactId = `art_${detail.session.sessionId.slice(4)}`
       const versionId = `av_${detail.session.sessionId.slice(4)}_1`
-      detail.execution = { ...detail.execution, status: 'LLM_RESULT_READY', pendingQuestion: null, updatedAt: new Date().toISOString() }
+      detail.execution = { ...detail.execution, status: 'LLM_RESULT_READY', revision: expectedRevision + 1, pendingQuestion: null, updatedAt: new Date().toISOString() }
       detail.executionRevision = expectedRevision + 1
       detail.artifact = { contractVersion: '1.0', artifactId, projectId: detail.session.projectId, sessionId: detail.session.sessionId, taskId: `task_${detail.session.sessionId.slice(4)}`, executionId, artifactType: 'ANALYSIS', title: 'Wynik analizy', status: 'READY_FOR_REVIEW', currentVersionId: versionId, revision: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
       detail.versions = [{ contractVersion: '1.0', artifactVersionId: versionId, artifactId, versionNumber: 1, sourceAttemptId: null, contentText: `Odpowiedź Ownera: ${answer.trim()}`, contentSchemaVersion: '1.0', checksum: 'mock', createdByType: 'SYSTEM', createdByReference: 'mock-vs1', createdAt: new Date().toISOString() }]
@@ -76,28 +78,121 @@ export function createMockVs1Service(): Vs1Service {
   }
 }
 
+// Bridges the mounted VS1 UI's Vs1Service contract onto the mature
+// PlatformApiClient (correlation IDs, timeouts, credentialed cookies,
+// response-shape validation, CONFLICT/currentRevision mapping) instead of a
+// second ad-hoc fetch layer. The only adapter-local state is a best-effort
+// executionId -> artifactId cache: no backend endpoint lists an Artifact by
+// its owning Execution (contract gap, see frontend-backend-contract-pack.md
+// §7), so it is reconstructed fresh from the Session on every getDetail()
+// call except for that one field, which is lost across a page reload -- the
+// same limitation the mock's in-memory Map has.
+const DEFAULT_POLL_INTERVAL_MS = 2_500
+const DEFAULT_POLL_MAX_ATTEMPTS = 8
+
+async function waitForExecution(client: PlatformApiClient, executionId: string, correlationId: string): Promise<ExecutionStatusResponse> {
+  let status = await client.getExecutionStatus(executionId, correlationId)
+  if (!EXECUTION_POLLING_STATUSES.has(status.status)) return status
+  let attempts = 0
+  return new Promise((resolve, reject) => {
+    const controller = trackExecutionStatus(client, { executionId, correlationId }, {
+      intervalMs: DEFAULT_POLL_INTERVAL_MS,
+      onState: (next) => {
+        status = next
+        attempts += 1
+        // Bounded polling (task §16, "minimalny kontrolowany polling"): a
+        // gateway that never calls back (no live n8n/OpenAI wired locally)
+        // must not hang this promise forever -- give up after a fixed
+        // number of attempts and hand back the last known, still-valid
+        // status instead of blocking the caller indefinitely.
+        if (attempts >= DEFAULT_POLL_MAX_ATTEMPTS) controller.stop()
+      },
+      onError: reject,
+    })
+    controller.whenDone.then(() => resolve(status)).catch(reject)
+  })
+}
+
+async function resolveSessionForExecution(client: PlatformApiClient, executionId: string, correlationId: string): Promise<SessionListItem> {
+  const execution = await client.getExecution(executionId, correlationId)
+  const task = await client.getTask(execution.taskId, correlationId)
+  return client.getSession(task.sessionId, correlationId)
+}
+
 export function createRealVs1Service(baseUrl: string): Vs1Service {
-  const api = baseUrl.replace(/\/$/, '')
-  const request = async <T>(method: 'GET' | 'POST', path: string, body?: object): Promise<T> => {
-    let response: Response
-    try { response = await fetch(`${api}${path}`, { method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }) } catch { error('NETWORK_ERROR') }
-    const value = await response.json().catch(() => null) as Record<string, unknown> | null
-    if (!response.ok) error(typeof value?.errorCode === 'string' ? value.errorCode : `HTTP_${response.status}`)
-    return value as T
+  const client = createPlatformApiClient(baseUrl)
+  const correlationId = () => crypto.randomUUID()
+  const idempotencyKey = () => crypto.randomUUID()
+  // Best-effort only -- see the module comment above for why this exists
+  // and what it does not survive (page reload).
+  const artifactByExecution = new Map<string, string>()
+
+  async function loadArtifact(executionId: string, cid: string): Promise<{ artifact: ArtifactResponse | null; versions: ArtifactVersionResponse[] }> {
+    const artifactId = artifactByExecution.get(executionId)
+    if (!artifactId) return { artifact: null, versions: [] }
+    const artifact = await client.getArtifact(artifactId, cid)
+    return { artifact, versions: await client.listArtifactVersions(artifactId, cid) }
   }
+
   return {
-    me: () => request('GET', '/auth/me'),
-    devLogin: (role) => request('POST', '/auth/dev-login', { contractVersion: '1.0', role }),
-    logout: async () => { await request('POST', '/auth/logout', { contractVersion: '1.0' }) },
-    async listSessions() { return (await request<{ sessions: SessionListItem[] }>('GET', '/sessions?ownerId=me')).sessions },
+    me: () => client.authMe(correlationId()),
+    devLogin: (role) => client.devLogin(role, correlationId()),
+    logout: () => client.logout(correlationId()),
+    listSessions: () => client.listSessionsOwnedByMe(correlationId()),
+
     async createSession(input) {
-      const project = await request<{ projectId: string }>('POST', '/projects', { contractVersion: '1.0', name: input.projectName, description: input.goal })
-      const created = await request<SessionResponse>('POST', `/projects/${project.projectId}/sessions`, { contractVersion: '1.0' })
-      const session = await request<SessionListItem>('POST', `/sessions/${created.sessionId}/start`, { contractVersion: '1.0', expectedRevision: created.revision })
-      return { session, execution: await request('GET', `/executions/${session.sessionId}/status`), executionRevision: null, artifact: null, versions: [] }
+      const cid = correlationId()
+      const project = await client.createProject(input.projectName, input.goal, cid)
+      const created = await client.createSession(project.projectId, cid)
+      const started = await client.startSession(created.sessionId, created.revision, cid) as SessionListItem
+      const task = await client.createTask(started.sessionId, `Analiza biznesowa: ${input.projectName}`, input.goal, cid)
+      const ready = await client.markTaskReady(task.taskId, task.revision, cid)
+      const execution = await client.startExecution(ready.taskId, ready.revision, idempotencyKey(), cid)
+      const status = await waitForExecution(client, execution.executionId, cid)
+      return { session: started, execution: status, executionRevision: status.revision, artifact: null, versions: [] }
     },
-    async getDetail(sessionId) { const session = await request<SessionListItem>('GET', `/sessions/${sessionId}`); return { session, execution: await request('GET', `/executions/${sessionId}/status`), executionRevision: null, artifact: null, versions: [] } },
-    async answer(executionId, expectedRevision, questionId, answer) { if (expectedRevision === null) error('CONTRACT_MISMATCH'); await request('POST', `/executions/${executionId}/answer`, { contractVersion: '1.0', idempotencyKey: crypto.randomUUID(), expectedRevision, questionId, answer }); error('INVALID_RESPONSE') },
-    async approve() { error('INVALID_RESPONSE') },
+
+    async getDetail(sessionId) {
+      const cid = correlationId()
+      const session = await client.getSession(sessionId, cid)
+      const tasks = await client.listSessionTasks(sessionId, cid)
+      const task = tasks[tasks.length - 1]
+      if (!task) error('NOT_FOUND')
+      const executions = await client.listTaskExecutions(task.taskId, cid)
+      const execution = executions[executions.length - 1]
+      if (!execution) error('NOT_FOUND')
+      const status = await client.getExecutionStatus(execution.executionId, cid)
+      const { artifact, versions } = await loadArtifact(execution.executionId, cid)
+      return { session, execution: status, executionRevision: status.revision, artifact, versions }
+    },
+
+    async answer(executionId, expectedRevision, questionId, answerText) {
+      if (expectedRevision === null) error('CONTRACT_MISMATCH')
+      const cid = correlationId()
+      await client.answerExecutionQuestion(executionId, expectedRevision, questionId, answerText, idempotencyKey(), cid)
+      const status = await waitForExecution(client, executionId, cid)
+      let artifact: ArtifactResponse | null = null
+      let versions: ArtifactVersionResponse[] = []
+      if (status.status === 'LLM_RESULT_READY') {
+        artifact = await client.createArtifactFromExecution(executionId, 'ANALYSIS', 'Wynik analizy', idempotencyKey(), cid)
+        artifactByExecution.set(executionId, artifact.artifactId)
+        versions = await client.listArtifactVersions(artifact.artifactId, cid)
+      }
+      const session = await resolveSessionForExecution(client, executionId, cid)
+      return { session, execution: status, executionRevision: status.revision, artifact, versions }
+    },
+
+    async approve(artifact, version) {
+      const cid = correlationId()
+      await client.createArtifactReviewDecision(artifact.artifactId, version.artifactVersionId, 'APPROVE', artifact.revision, idempotencyKey(), cid)
+      // Backend is the source of truth for both the Artifact and (GAP-010)
+      // whether Approval completed the Session -- re-read both rather than
+      // assuming the outcome locally (task §15).
+      const refreshedArtifact = await client.getArtifact(artifact.artifactId, cid)
+      const versions = await client.listArtifactVersions(artifact.artifactId, cid)
+      const session = await resolveSessionForExecution(client, artifact.executionId, cid)
+      const status = await client.getExecutionStatus(artifact.executionId, cid)
+      return { session, execution: status, executionRevision: status.revision, artifact: refreshedArtifact, versions }
+    },
   }
 }
