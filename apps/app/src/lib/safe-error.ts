@@ -20,6 +20,7 @@ const SAFE_MESSAGES: Record<string, string> = {
   TIMEOUT: 'Przekroczono czas oczekiwania na odpowiedź. Sprawdź stan przed ponowieniem.',
   NETWORK_ERROR: 'Nie udało się połączyć z Platform API.',
   INVALID_RESPONSE: 'Odpowiedź Platform API jest niezgodna z kontraktem.',
+  CONTRACT_MISMATCH: 'Kontrakt API nie zawiera danych wymaganych do bezpiecznego wykonania tej akcji.',
   ARTIFACT_CONTENT_INVALID: 'Treść nowej wersji nie spełnia wymagań kontraktu.',
 }
 
