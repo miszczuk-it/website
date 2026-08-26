@@ -65,6 +65,11 @@ export type ExecutionStatusResponse = {
   contractVersion: '1.0'
   executionId: string
   status: ExecutionStatus
+  // Real backend field since GAP-009 (ai-platform PR #49): the value POST
+  // /executions/:id/answer requires as expectedRevision. Superseded the
+  // app-state-only Vs1Detail.executionRevision tracking the mock still
+  // documents for its own reasons.
+  revision: number
   attemptId: string | null
   attemptNumber: number | null
   attemptStatus: AttemptStatus | null

@@ -8,6 +8,31 @@ ze stroną informacyjną `miszczuk.it`.
 - `VITE_PLATFORM_API_URL` — publiczny prefiks Platform API, domyślnie `/api`;
 - `VITE_PLATFORM_API_ENABLED` — aktywuje rzeczywiste wywołania formularza.
 - `VITE_APP_ENV` — jawne oznaczenie środowiska, na przykład `DEV`.
+- `VITE_DEV_API_PROXY_TARGET` — tylko dla `vite dev` (nie dotyczy `vite build`):
+  adres lokalnego backendu (`docker-compose.dev.yml`, domyślnie
+  `http://localhost:8080`), do którego `vite dev` proxy'uje `/api`. Backend
+  DEV Mock Auth ustawia ciasteczko `SameSite=Lax` i akceptuje CORS tylko z
+  własnego originu — bez proxy, wywołania z `vite dev` (inny port) nie
+  przenosiłyby tego ciasteczka.
+
+## Adapter VS1 (Frontend Real API Integration)
+
+`VerticalSliceWorkspace` (`src/components/VerticalSliceWorkspace.tsx`) korzysta
+z `Vs1Service` (`src/lib/vs1-service.ts`), który ma dwie implementacje wybierane
+przez `VITE_PLATFORM_API_ENABLED` (bez zmiany UI):
+
+- `createMockVs1Service()` — makieta w pamięci, do testów/dev bez backendu;
+- `createRealVs1Service(baseUrl)` — realny adapter zbudowany na
+  `PlatformApiClient` (`src/lib/platform-api.ts`): AUTH (dev-login/me/logout),
+  Session list/create/detail, Question/Answer (`revision` jako
+  `expectedRevision`), Artifact Version, Approval. Źródłem prawdy jest zawsze
+  backend (`GET /api/sessions/{id}` po Approval, zgodnie z `GAP-010`).
+
+Realny adapter nie ma z czego wyliczyć Artifact po stronie klienta bez
+uprzedniego wywołania `POST /executions/{id}/artifacts` (backend nie
+udostępnia odczytu Artifact po `executionId`) — trzyma więc krótkotrwałą
+mapę `executionId -> artifactId` tylko w pamięci procesu; ginie po
+przeładowaniu strony, tak jak w mocku.
 
 Obraz wdrożeniowy buduje `apps/app/Dockerfile`. Konfiguracja DEV ustawia API na
 `/api`, włącza wywołania Platform API i wyświetla etykietę „Środowisko DEV”.
