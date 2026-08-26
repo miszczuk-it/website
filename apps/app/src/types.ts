@@ -34,9 +34,18 @@ export type MvpFlowState = {
 
 export type ProjectResponse = { contractVersion: '1.0'; projectId: string; status: 'ACTIVE' | 'ARCHIVED'; revision: number }
 export type SessionResponse = { contractVersion: '1.0'; sessionId: string; projectId: string; status: 'CREATED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'; revision: number }
+export type EffectiveRole = 'OWNER' | 'OBSERVER' | 'ADMIN'
+export type AuthMeResponse = {
+  contractVersion: '1.0'
+  userId: string
+  displayName: string
+  effectiveRole: EffectiveRole
+  permissions: string[]
+}
+export type SessionListItem = SessionResponse & { ownerId: string; createdAt: string }
 export type TaskResponse = { contractVersion: '1.0'; taskId: string; sessionId: string; status: 'CREATED' | 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; revision: number }
 
-export type ExecutionStatus = 'CREATED' | 'BUILDING_CONTEXT' | 'WAITING_FOR_LLM_GATEWAY' | 'RUNNING' | 'LLM_RESULT_READY' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_FINAL' | 'CANCELLED' | 'UNKNOWN'
+export type ExecutionStatus = 'CREATED' | 'BUILDING_CONTEXT' | 'WAITING_FOR_LLM_GATEWAY' | 'WAITING_FOR_USER_INPUT' | 'RUNNING' | 'LLM_RESULT_READY' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_FINAL' | 'CANCELLED' | 'UNKNOWN'
 export type AttemptStatus = 'CREATED' | 'RUNNING' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_FINAL' | 'CANCELLED' | 'UNKNOWN'
 export type ExecutionResponse = {
   contractVersion: '1.0'
@@ -77,6 +86,7 @@ export type ExecutionStatusResponse = {
   safeErrorCode: string | null
   safeErrorMessage: string | null
   updatedAt: string
+  pendingQuestion?: { questionId: string; prompt: string; inputSchema: null } | null
 }
 
 // Artifact / Human-in-the-Loop review types (MVP-IMPL-005D), mirroring
