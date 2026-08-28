@@ -52,8 +52,37 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .artifact-decision-history li p { margin: 6px 0 0; }
 .notice-inline { color: #93370d; font-weight: 700; font-size: .875rem; }
 
+/* VS1 UX redesign (2026-08-28): Moje analizy list + open-analysis view. */
+.panel-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.panel-header-row h2 { margin: 0; }
+.analysis-list { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 10px; }
+.analysis-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; align-items: center; gap: 6px 16px; width: 100%; text-align: left; padding: 14px 16px; }
+.analysis-name { font-weight: 800; overflow-wrap: anywhere; }
+.analysis-stage { color: #526078; overflow-wrap: anywhere; }
+.analysis-meta { grid-column: 1 / -1; color: #667085; font-size: .8rem; }
+.back-link { border: none; background: none; padding: 0; margin-bottom: 12px; color: #155eef; font-weight: 700; cursor: pointer; }
+.panel-section { margin-top: 18px; padding-top: 18px; border-top: 1px solid #d9e0eb; }
+.workflow-progress h3, .panel-section h3 { margin-top: 0; }
+.stage-list { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 8px; }
+.stage-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; background: #f8fafc; }
+.stage-row-completed { color: #067647; }
+.stage-row-current { background: #d1e0ff; color: #155eef; font-weight: 800; }
+.stage-row-upcoming { color: #98a2b3; }
+.stage-icon { font-weight: 800; width: 1.2em; text-align: center; }
+.stage-name { flex: 1; overflow-wrap: anywhere; }
+.stage-history-count { font-size: .75rem; color: #667085; }
+.specialist-panel p { margin: 6px 0; }
+.artifact-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.stage-picker { border: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.stage-picker-option { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.history-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.history-versions { list-style: none; margin: 4px 0 0; padding-left: 12px; display: grid; gap: 4px; font-size: .875rem; color: #526078; }
+.details-toggle { border: none; background: none; padding: 0; color: #667085; font-size: .8rem; cursor: pointer; text-decoration: underline; }
+.technical-details { margin-top: 10px; font-size: .8rem; }
+
 @media (max-width: 640px) {
   .app-shell { width: min(100% - 20px, 960px); padding-top: 32px; }
   .panel { padding: 18px; }
   .result-grid { grid-template-columns: 1fr; }
+  .analysis-row { grid-template-columns: 1fr; }
 }

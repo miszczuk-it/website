@@ -1,7 +1,7 @@
 import { PlatformApiError } from './safe-error.js'
 import { createPlatformApiClient, type PlatformApiClient } from './platform-api.js'
 import { EXECUTION_POLLING_STATUSES, trackExecutionStatus } from './execution-flow.js'
-import type { ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, SessionListItem } from '../types.js'
+import type { ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, SessionListItem, SessionWorkflowResponse } from '../types.js'
 
 export type Vs1Detail = {
   session: SessionListItem
@@ -37,6 +37,17 @@ export interface Vs1Service {
   // states are retryable; expectedRevision/idempotencyKey give the backend
   // its optimistic-concurrency and double-click protection (task §4/§5).
   retry(executionId: string, expectedRevision: number, reason: string): Promise<Vs1Detail>
+  // GAP-015: server-computed active lineage of the fixed 4-stage chain --
+  // "Postęp", current/next specialist, and per-stage history all come from
+  // this single read-model, never inferred client-side.
+  getWorkflow(sessionId: string): Promise<SessionWorkflowResponse>
+  // "Poproś o poprawę": redo the CURRENT stage. Two-step backend contract
+  // (REQUEST_REVISION decision, then POST /artifacts/:id/revision), mirrored
+  // from AnalysisWorkspace.tsx's decideOnArtifact/beginRevisionPolling.
+  requestRevision(artifact: ArtifactResponse, version: ArtifactVersionResponse, feedback: string): Promise<Vs1Detail>
+  // "Wróć do wcześniejszego etapu": return to an earlier, already-approved
+  // stage identified by targetTaskId (from a SessionWorkflowStage.activeTask).
+  returnToStage(sessionId: string, targetTaskId: string, feedback: string, expectedRevision: number): Promise<Vs1Detail>
 }
 
 const owner: AuthMeResponse = { contractVersion: '1.0', userId: 'usr_owner_demo', displayName: 'Anna Kowalska', effectiveRole: 'OWNER', permissions: ['session.view', 'session.create', 'session.answer_question', 'session.comment', 'session.feedback', 'session.approve', 'session.request_revision', 'session.cancel_own'] }
@@ -118,6 +129,41 @@ export function createMockVs1Service(): Vs1Service {
       detail.versions = [{ contractVersion: '1.0', artifactVersionId: versionId, artifactId, versionNumber: 1, sourceAttemptId: null, contentText: 'Wynik po ponowieniu.', contentSchemaVersion: '1.0', checksum: 'mock', createdByType: 'SYSTEM', createdByReference: 'mock-vs1-retry', createdAt: new Date().toISOString() }]
       return refresh(detail)
     },
+    // The mock only ever models a single BUSINESS_ANALYSIS stage (see the
+    // note on advanceToNextSpecialist above) -- its workflow projection
+    // reflects that: BA is COMPLETED/CURRENT depending on the Artifact,
+    // the other three stages are always UPCOMING with no Task yet.
+    async getWorkflow(sessionId) {
+      const detail = details.get(sessionId); if (!detail) error('NOT_FOUND')
+      const baState = !detail.artifact ? 'CURRENT' : detail.artifact.status === 'APPROVED' ? 'COMPLETED' : 'CURRENT'
+      const baTask = detail.artifact ? { contractVersion: '1.0' as const, taskId: `task_${sessionId.slice(4)}`, sessionId, taskType: 'BUSINESS_ANALYSIS', status: 'RUNNING' as const, revision: 1 } : null
+      const stage = (taskType: 'BUSINESS_ANALYSIS' | 'PROJECT_PLANNING' | 'CODE_IMPLEMENTATION' | 'QUALITY_REVIEW', state: 'COMPLETED' | 'CURRENT' | 'UPCOMING', activeTask: typeof baTask = null, activeArtifact: ArtifactResponse | null = null) =>
+        ({ taskType, state, activeTask, activeArtifact, historicalTasks: [] })
+      const chain = [
+        stage('BUSINESS_ANALYSIS', baState, baTask, detail.artifact),
+        stage('PROJECT_PLANNING', 'UPCOMING'),
+        stage('CODE_IMPLEMENTATION', 'UPCOMING'),
+        stage('QUALITY_REVIEW', 'UPCOMING'),
+      ]
+      const currentStageIndex = baState === 'CURRENT' ? 0 : 4
+      return {
+        contractVersion: '1.0', sessionId, sessionStatus: detail.session.status, chain, currentStageIndex, totalStages: 4,
+        currentSpecialistTaskType: currentStageIndex < 4 ? 'BUSINESS_ANALYSIS' : null,
+        nextSpecialistTaskType: currentStageIndex === 0 ? 'PROJECT_PLANNING' : null,
+      }
+    },
+    async requestRevision(artifact, version, feedback) {
+      const detail = details.get(artifact.sessionId); if (!detail) error('NOT_FOUND')
+      if (artifact.currentVersionId !== version.artifactVersionId) error('ARTIFACT_VERSION_NOT_CURRENT')
+      if (!feedback.trim()) error('REVIEW_COMMENT_REQUIRED')
+      const versionId = `av_${detail.session.sessionId.slice(4)}_rev`
+      detail.artifact = { ...artifact, status: 'READY_FOR_REVIEW', revision: artifact.revision + 2, currentVersionId: versionId, updatedAt: new Date().toISOString() }
+      detail.versions = [...detail.versions, { contractVersion: '1.0', artifactVersionId: versionId, artifactId: artifact.artifactId, versionNumber: detail.versions.length + 1, sourceAttemptId: null, contentText: `Poprawiony wynik uwzględniający: ${feedback.trim()}`, contentSchemaVersion: '1.0', checksum: 'mock', createdByType: 'SYSTEM', createdByReference: 'mock-vs1-revision', createdAt: new Date().toISOString() }]
+      return refresh(detail)
+    },
+    // The mock has only one stage, so there is never an earlier stage to
+    // return to -- the same NOT_EARLIER_STAGE the real backend would give.
+    async returnToStage() { error('NOT_EARLIER_STAGE') },
   }
 }
 
@@ -302,6 +348,33 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
       const task = await client.getTask(execution.taskId, cid)
       const { artifact, versions } = await ensureArtifact(executionId, status, task.taskType, cid)
       const session = await client.getSession(task.sessionId, cid)
+      return { session, execution: status, executionRevision: status.revision, artifact, versions }
+    },
+
+    getWorkflow: (sessionId) => client.getSessionWorkflow(sessionId, correlationId()),
+
+    // Two-step backend contract, matching AnalysisWorkspace.tsx's
+    // decideOnArtifact/beginRevisionPolling: REQUEST_REVISION decision
+    // first, then the explicit POST /artifacts/:id/revision command that
+    // actually creates the new Task + Execution (mirrors the existing
+    // requestRevision()-adjacent `/revision` route used for QA-driven
+    // revisions elsewhere in this file).
+    async requestRevision(artifact, version, feedback) {
+      const cid = correlationId()
+      await client.createArtifactReviewDecision(artifact.artifactId, version.artifactVersionId, 'REQUEST_REVISION', artifact.revision, idempotencyKey(), cid, feedback)
+      const { task, execution } = await client.createArtifactRevision(artifact.artifactId, feedback, idempotencyKey(), cid)
+      const status = await waitForExecution(client, execution.executionId, cid)
+      const { artifact: refreshedArtifact, versions } = await ensureArtifact(execution.executionId, status, task.taskType, cid)
+      const session = await client.getSession(task.sessionId, cid)
+      return { session, execution: status, executionRevision: status.revision, artifact: refreshedArtifact, versions }
+    },
+
+    async returnToStage(sessionId, targetTaskId, feedback, expectedRevision) {
+      const cid = correlationId()
+      const { task, execution } = await client.returnToStageRevision(sessionId, targetTaskId, feedback, expectedRevision, idempotencyKey(), cid)
+      const status = await waitForExecution(client, execution.executionId, cid)
+      const { artifact, versions } = await ensureArtifact(execution.executionId, status, task.taskType, cid)
+      const session = await client.getSession(sessionId, cid)
       return { session, execution: status, executionRevision: status.revision, artifact, versions }
     },
   }

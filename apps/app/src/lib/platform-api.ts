@@ -1,7 +1,7 @@
 import { PlatformApiError } from './safe-error.js'
 import type {
   ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionEnvelope, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
-  AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionListItem, SessionResponse, TaskResponse,
+  AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionListItem, SessionResponse, SessionWorkflowResponse, TaskResponse,
 } from '../types.js'
 
 type FetchLike = typeof fetch
@@ -34,6 +34,13 @@ export type PlatformApiClient = {
   createArtifactVersion(artifactId: string, expectedArtifactRevision: number, contentSchemaVersion: string, content: ArtifactNewVersionContent, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
   createArtifactReviewDecision(artifactId: string, artifactVersionId: string, decisionType: ArtifactDecisionType, expectedVersion: number, idempotencyKey: string, correlationId: string, comment?: string): Promise<ArtifactReviewDecisionEnvelope>
   listArtifactReviewDecisions(artifactId: string, correlationId: string): Promise<ArtifactReviewDecisionResponse[]>
+  // Current-stage revision (existing backend contract, POST /artifacts/:id/revision):
+  // the source Artifact must already be REVISION_REQUESTED.
+  createArtifactRevision(artifactId: string, feedback: string, idempotencyKey: string, correlationId: string): Promise<{ task: TaskResponse; execution: ExecutionResponse }>
+  // GAP-015: server-computed active lineage of the fixed 4-stage chain.
+  getSessionWorkflow(sessionId: string, correlationId: string): Promise<SessionWorkflowResponse>
+  // GAP-015: return to an earlier, already-APPROVED stage.
+  returnToStageRevision(sessionId: string, targetTaskId: string, feedback: string, expectedRevision: number, idempotencyKey: string, correlationId: string): Promise<{ task: TaskResponse; session: SessionListItem; execution: ExecutionResponse }>
 }
 
 type ClientOptions = { fetchImpl?: FetchLike; timeoutMs?: number; createId?: () => string }
@@ -112,6 +119,24 @@ function assertArtifactDecisionEnvelope(value: unknown): ArtifactReviewDecisionE
     throw new PlatformApiError('INVALID_RESPONSE')
   }
   return { contractVersion: '1.0', reviewDecision: assertArtifactDecision(value.reviewDecision), triggeredExecutionId: value.triggeredExecutionId as string | null }
+}
+
+function assertWorkflow(value: unknown): SessionWorkflowResponse {
+  if (!isRecord(value) || value.contractVersion !== '1.0' || typeof value.sessionId !== 'string'
+    || typeof value.sessionStatus !== 'string' || !Array.isArray(value.chain) || !Number.isInteger(value.currentStageIndex)) {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as SessionWorkflowResponse
+}
+
+function assertTaskExecutionEnvelope(value: unknown): { task: TaskResponse; execution: ExecutionResponse } {
+  if (!isRecord(value) || !isRecord(value.task) || !isRecord(value.execution)) throw new PlatformApiError('INVALID_RESPONSE')
+  return { task: value.task as unknown as TaskResponse, execution: value.execution as unknown as ExecutionResponse }
+}
+
+function assertReturnToStageEnvelope(value: unknown): { task: TaskResponse; session: SessionListItem; execution: ExecutionResponse } {
+  if (!isRecord(value) || !isRecord(value.task) || !isRecord(value.session) || !isRecord(value.execution)) throw new PlatformApiError('INVALID_RESPONSE')
+  return { task: value.task as unknown as TaskResponse, session: value.session as unknown as SessionListItem, execution: value.execution as unknown as ExecutionResponse }
 }
 
 export function createPlatformApiClient(baseUrl: string, options: ClientOptions = {}): PlatformApiClient {
@@ -207,5 +232,12 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
       contractVersion: '1.0', artifactVersionId, decisionType, idempotencyKey, expectedVersion, ...(comment ? { comment } : {}),
     }, correlationId, assertArtifactDecisionEnvelope),
     listArtifactReviewDecisions: (artifactId, correlationId) => callList(`/artifacts/${artifactId}/decisions`, correlationId, assertArtifactDecision),
+    createArtifactRevision: (artifactId, feedback, idempotencyKey, correlationId) => callValidated('POST', `/artifacts/${artifactId}/revision`, {
+      contractVersion: '1.0', idempotencyKey, feedback,
+    }, correlationId, assertTaskExecutionEnvelope),
+    getSessionWorkflow: (sessionId, correlationId) => callValidated('GET', `/sessions/${sessionId}/workflow`, null, correlationId, assertWorkflow),
+    returnToStageRevision: (sessionId, targetTaskId, feedback, expectedRevision, idempotencyKey, correlationId) => callValidated('POST', `/sessions/${sessionId}/revisions/return-to-stage`, {
+      contractVersion: '1.0', targetTaskId, feedback, expectedRevision, idempotencyKey,
+    }, correlationId, assertReturnToStageEnvelope),
   }
 }

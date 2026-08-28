@@ -42,8 +42,51 @@ export type AuthMeResponse = {
   effectiveRole: EffectiveRole
   permissions: string[]
 }
-export type SessionListItem = SessionResponse & { ownerId: string; createdAt: string }
-export type TaskResponse = { contractVersion: '1.0'; taskId: string; sessionId: string; taskType: string; status: 'CREATED' | 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; revision: number }
+// GAP-014: GET /api/sessions enriches each row with human-readable
+// metadata so the frontend never has to show a raw sessionId GUID as a
+// session's primary label -- projectName/currentTaskType/updatedAt are all
+// optional (older cached shapes without them are still structurally valid).
+export type SpecialistTaskType = 'BUSINESS_ANALYSIS' | 'PROJECT_PLANNING' | 'CODE_IMPLEMENTATION' | 'QUALITY_REVIEW'
+export type SessionListItem = SessionResponse & {
+  ownerId: string
+  createdAt: string
+  projectName?: string | null
+  currentTaskType?: SpecialistTaskType | null
+  updatedAt?: string
+}
+export type TaskResponse = {
+  contractVersion: '1.0'
+  taskId: string
+  sessionId: string
+  taskType: string
+  status: 'CREATED' | 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+  revision: number
+  title?: string
+  description?: string
+  revisionOfTaskId?: string | null
+}
+
+// GAP-015: GET /api/sessions/:id/workflow -- the server-computed active
+// lineage of the fixed BA->PM->Developer->QA chain. The frontend never
+// infers which Task/Artifact is active vs. historical itself.
+export type WorkflowStageState = 'COMPLETED' | 'CURRENT' | 'UPCOMING'
+export type SessionWorkflowStage = {
+  taskType: SpecialistTaskType
+  state: WorkflowStageState
+  activeTask: TaskResponse | null
+  activeArtifact: ArtifactResponse | null
+  historicalTasks: TaskResponse[]
+}
+export type SessionWorkflowResponse = {
+  contractVersion: '1.0'
+  sessionId: string
+  sessionStatus: 'CREATED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'
+  chain: SessionWorkflowStage[]
+  currentStageIndex: number
+  totalStages: number
+  currentSpecialistTaskType: SpecialistTaskType | null
+  nextSpecialistTaskType: SpecialistTaskType | null
+}
 
 export type ExecutionStatus = 'CREATED' | 'BUILDING_CONTEXT' | 'WAITING_FOR_LLM_GATEWAY' | 'WAITING_FOR_USER_INPUT' | 'RUNNING' | 'LLM_RESULT_READY' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_FINAL' | 'CANCELLED' | 'UNKNOWN'
 export type AttemptStatus = 'CREATED' | 'RUNNING' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_FINAL' | 'CANCELLED' | 'UNKNOWN'
