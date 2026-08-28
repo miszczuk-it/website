@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AnalysisWorkspace, ExecutionStatusPanel } from '../src/components/AnalysisWorkspace.js'
+import { ExecutionRetryStatus } from '../src/components/VerticalSliceWorkspace.js'
 import { ArtifactReviewPanel } from '../src/components/ArtifactReviewPanel.js'
 import { createArtifactVersionAndRefresh, decideArtifactAndRefresh, handleRevisionExecutionStatus } from '../src/lib/artifact-flow.js'
 import { createFlowState, runMvpFlow } from '../src/lib/mvp-flow.js'
@@ -385,6 +386,56 @@ test('ExecutionStatusPanel never renders a raw error response shape (no stack, n
   for (const forbidden of ['stack', 'Error:', 'SELECT ', 'postgres', 'HMAC', 'x-gateway-signature']) {
     assert.equal(html.toLowerCase().includes(forbidden.toLowerCase()), false, forbidden)
   }
+})
+
+test('ExecutionRetryStatus shows a specific incomplete-response message and Retry button for a retryable max_output_tokens Execution, not a generic crash message', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionRetryStatus, {
+    execution: { ...BASE_EXECUTION_STATUS, status: 'FAILED_RETRYABLE', isIncomplete: true, incompleteReason: 'max_output_tokens', retryAllowed: true },
+    retrying: false, onRetry: () => {},
+  }))
+  assert.ok(html.includes('Wynik modelu jest niekompletny'))
+  assert.ok(html.includes('max_output_tokens'))
+  assert.ok(html.includes('Ponów wykonanie'))
+  assert.equal(html.includes('Nie udało się wykonać operacji'), false, 'must not fall back to the generic crash message')
+})
+
+test('ExecutionRetryStatus hides the Retry button for an active/running Execution', () => {
+  for (const status of ['WAITING_FOR_LLM_GATEWAY', 'RUNNING'] as const) {
+    const html = renderToStaticMarkup(createElement(ExecutionRetryStatus, {
+      execution: { ...BASE_EXECUTION_STATUS, status, isIncomplete: false, incompleteReason: null, retryAllowed: false },
+      retrying: false, onRetry: () => {},
+    }))
+    assert.equal(html.includes('Ponów wykonanie'), false, status)
+    assert.equal(html.includes('Wynik modelu jest niekompletny'), false, status)
+  }
+})
+
+test('ExecutionRetryStatus shows a safe terminal-failure message for FAILED_FINAL without a retry button', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionRetryStatus, {
+    execution: { ...BASE_EXECUTION_STATUS, status: 'FAILED_FINAL', retryAllowed: false, safeErrorMessage: 'Bezpieczny komunikat błędu.' },
+    retrying: false, onRetry: () => {},
+  }))
+  assert.ok(html.includes('Bezpieczny komunikat błędu.'))
+  assert.equal(html.includes('Ponów wykonanie'), false)
+})
+
+test('ExecutionRetryStatus disables the Retry button while a retry is in flight', () => {
+  const html = renderToStaticMarkup(createElement(ExecutionRetryStatus, {
+    execution: { ...BASE_EXECUTION_STATUS, status: 'FAILED_RETRYABLE', retryAllowed: true },
+    retrying: true, onRetry: () => {},
+  }))
+  assert.ok(html.includes('disabled='))
+  assert.ok(html.includes('Ponawianie…'))
+})
+
+test('runGuarded ensures the VS1 retry action reaches the API exactly once even if invoked twice (double-click protection)', async () => {
+  let retryCalls = 0
+  const guard: SingleFlightGuard = { busy: false }
+  const retryAction = async () => { retryCalls += 1; await new Promise((resolve) => setTimeout(resolve, 5)); return 'retried' }
+  const [first, second] = await Promise.all([runGuarded(guard, retryAction), runGuarded(guard, retryAction)])
+  assert.equal(retryCalls, 1)
+  assert.equal(first, 'retried')
+  assert.equal(second, null)
 })
 
 test('Artifact API client uses canonical endpoints for create, submit-for-review and decisions', async () => {

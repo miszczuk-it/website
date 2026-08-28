@@ -125,3 +125,52 @@ test('real VS1 adapter rejects answer() with CONTRACT_MISMATCH when no expectedR
     (error: unknown) => error instanceof PlatformApiError && error.code === 'CONTRACT_MISMATCH',
   )
 })
+
+test('real VS1 adapter retry() sends the current revision and a fresh idempotencyKey, then resumes the Artifact flow', async () => {
+  const executionId = 'exe-retry', taskId = 'task-retry', sessionId = 'ses-retry', artifactId = 'art-retry', versionId = 'ver-retry'
+  const captured: { retryRequestBody: Record<string, unknown> | null } = { retryRequestBody: null }
+  const fetchImpl = fakeFetch([
+    { method: 'POST', path: `/executions/${executionId}/retry`, respond: (body) => {
+      captured.retryRequestBody = body as Record<string, unknown>
+      return { status: 200, body: { contractVersion: '1.0', executionId, taskId, correlationId: 'c-1', idempotencyKey: (body as Record<string, unknown>).idempotencyKey, status: 'WAITING_FOR_LLM_GATEWAY', revision: 5 } }
+    } },
+    { method: 'GET', path: `/executions/${executionId}/status`, respond: () => ({ status: 200, body: { contractVersion: '1.0', executionId, status: 'LLM_RESULT_READY', revision: 5, isIncomplete: false, incompleteReason: null, retryAllowed: false, reconcileRequired: false, updatedAt: '2026-08-28T09:05:00Z', pendingQuestion: null } }) },
+    { method: 'GET', path: `/executions/${executionId}`, respond: () => ({ status: 200, body: { contractVersion: '1.0', executionId, taskId, correlationId: 'c-1', idempotencyKey: 'k-1', status: 'LLM_RESULT_READY', revision: 5 } }) },
+    { method: 'GET', path: `/tasks/${taskId}`, respond: () => ({ status: 200, body: { contractVersion: '1.0', taskId, sessionId, taskType: 'PROJECT_PLANNING', status: 'READY', revision: 1 } }) },
+    { method: 'POST', path: `/executions/${executionId}/artifacts`, respond: () => ({ status: 201, body: { contractVersion: '1.0', artifactId, projectId: 'prj-retry', sessionId, taskId, executionId, artifactType: 'PROJECT_PLAN', title: 'Plan projektu', status: 'READY_FOR_REVIEW', currentVersionId: versionId, revision: 1, createdAt: '2026-08-28T09:05:01Z', updatedAt: '2026-08-28T09:05:01Z' } }) },
+    { method: 'GET', path: `/artifacts/${artifactId}/versions`, respond: () => ({ status: 200, body: [{ contractVersion: '1.0', artifactVersionId: versionId, artifactId, versionNumber: 1, sourceAttemptId: null, contentText: 'Plan po ponowieniu.', contentSchemaVersion: '1.0', checksum: 'sha256:y', createdByType: 'SYSTEM', createdByReference: 'attempt:a-2', createdAt: '2026-08-28T09:05:01Z' }] }) },
+    { method: 'GET', path: `/sessions/${sessionId}`, respond: () => ({ status: 200, body: { contractVersion: '1.0', sessionId, projectId: 'prj-retry', ownerId: 'dev-owner', status: 'ACTIVE', revision: 3, createdAt: '2026-08-28T09:00:00Z' } }) },
+  ])
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = fetchImpl
+  try {
+    const service = createRealVs1Service(BASE)
+    const result = await service.retry(executionId, 4, 'Ponowienie wykonania przez użytkownika.')
+    assert.equal(captured.retryRequestBody?.expectedRevision, 4, 'current revision must be sent as expectedRevision')
+    assert.equal(typeof captured.retryRequestBody?.idempotencyKey, 'string')
+    assert.ok((captured.retryRequestBody?.idempotencyKey as string).length > 0)
+    assert.equal(result.execution.status, 'LLM_RESULT_READY')
+    assert.equal(result.artifact?.status, 'READY_FOR_REVIEW')
+    assert.equal(result.session.sessionId, sessionId)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('real VS1 adapter surfaces a 409 revision conflict from retry() as a machine-readable PlatformApiError (stale revision handled)', async () => {
+  const executionId = 'exe-retry-conflict'
+  const fetchImpl = fakeFetch([
+    { method: 'POST', path: `/executions/${executionId}/retry`, respond: () => ({ status: 409, body: { contractVersion: '1.0', errorCode: 'CONFLICT', message: 'Zasób został zmieniony przez inne żądanie.', correlationId: 'corr-2', currentRevision: 7 } }) },
+  ])
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = fetchImpl
+  try {
+    const service = createRealVs1Service(BASE)
+    await assert.rejects(
+      service.retry(executionId, 4, 'Ponowienie wykonania przez użytkownika.'),
+      (error: unknown) => error instanceof PlatformApiError && error.code === 'CONFLICT' && error.currentRevision === 7,
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
