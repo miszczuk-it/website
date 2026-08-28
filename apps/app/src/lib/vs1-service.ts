@@ -124,12 +124,9 @@ export function createMockVs1Service(): Vs1Service {
 // Bridges the mounted VS1 UI's Vs1Service contract onto the mature
 // PlatformApiClient (correlation IDs, timeouts, credentialed cookies,
 // response-shape validation, CONFLICT/currentRevision mapping) instead of a
-// second ad-hoc fetch layer. The only adapter-local state is a best-effort
-// executionId -> artifactId cache: no backend endpoint lists an Artifact by
-// its owning Execution (contract gap, see frontend-backend-contract-pack.md
-// §7), so it is reconstructed fresh from the Session on every getDetail()
-// call except for that one field, which is lost across a page reload -- the
-// same limitation the mock's in-memory Map has.
+// second ad-hoc fetch layer. Artifact recovery is server-owned through the
+// canonical execution -> Artifact lookup, so it requires no browser cache
+// and remains valid after a page reload.
 const DEFAULT_POLL_INTERVAL_MS = 2_500
 const DEFAULT_POLL_MAX_ATTEMPTS = 8
 
@@ -176,15 +173,8 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
   const client = createPlatformApiClient(baseUrl)
   const correlationId = () => crypto.randomUUID()
   const idempotencyKey = () => crypto.randomUUID()
-  // Best-effort only -- see the module comment above for why this exists
-  // and what it does not survive (page reload).
-  const artifactByExecution = new Map<string, string>()
-
-  async function loadArtifact(executionId: string, cid: string): Promise<{ artifact: ArtifactResponse | null; versions: ArtifactVersionResponse[] }> {
-    const artifactId = artifactByExecution.get(executionId)
-    if (!artifactId) return { artifact: null, versions: [] }
-    const artifact = await client.getArtifact(artifactId, cid)
-    return { artifact, versions: await client.listArtifactVersions(artifactId, cid) }
+  async function loadArtifact(artifact: ArtifactResponse, cid: string): Promise<{ artifact: ArtifactResponse; versions: ArtifactVersionResponse[] }> {
+    return { artifact, versions: await client.listArtifactVersions(artifact.artifactId, cid) }
   }
 
   // A specialist's Execution can reach LLM_RESULT_READY without ever going
@@ -192,22 +182,24 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
   // Artifact there). Without this, an Execution that completes directly has
   // no caller that ever issues POST /executions/{id}/artifacts, so no
   // Artifact Version ever appears in the UI for it -- confirmed as a real
-  // blocker during Local UI / Browser Validation (2026-08-27/28). Safe to
-  // call repeatedly: if the Artifact was already created by an earlier call
-  // this map has lost track of (e.g. a page reload -- GAP-012), the backend
-  // rejects the retry with ARTIFACT_ALREADY_EXISTS, which is swallowed here
-  // rather than surfaced, since there is still no endpoint to look the
-  // Artifact up by executionId (frontend-backend-contract-pack.md §7).
+  // blocker during Local UI / Browser Validation (2026-08-27/28). The
+  // canonical read happens first, and a concurrent create is recovered by
+  // the same read after ARTIFACT_ALREADY_EXISTS.
   async function ensureArtifact(executionId: string, status: ExecutionStatusResponse, taskType: string, cid: string): Promise<{ artifact: ArtifactResponse | null; versions: ArtifactVersionResponse[] }> {
-    if (artifactByExecution.has(executionId)) return loadArtifact(executionId, cid)
+    try {
+      return await loadArtifact(await client.getArtifactByExecution(executionId, cid), cid)
+    } catch (err) {
+      if (!(err instanceof PlatformApiError) || err.code !== 'NOT_FOUND') throw err
+    }
     if (status.status !== 'LLM_RESULT_READY') return { artifact: null, versions: [] }
     const meta = ARTIFACT_TYPE_BY_TASK_TYPE[taskType] ?? ARTIFACT_TYPE_BY_TASK_TYPE.BUSINESS_ANALYSIS
     try {
       const artifact = await client.createArtifactFromExecution(executionId, meta.artifactType, meta.title, idempotencyKey(), cid)
-      artifactByExecution.set(executionId, artifact.artifactId)
-      return { artifact, versions: await client.listArtifactVersions(artifact.artifactId, cid) }
+      return loadArtifact(artifact, cid)
     } catch (err) {
-      if (err instanceof PlatformApiError && err.code === 'ARTIFACT_ALREADY_EXISTS') return { artifact: null, versions: [] }
+      if (err instanceof PlatformApiError && err.code === 'ARTIFACT_ALREADY_EXISTS') {
+        return loadArtifact(await client.getArtifactByExecution(executionId, cid), cid)
+      }
       throw err
     }
   }
@@ -250,13 +242,9 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
       const cid = correlationId()
       await client.answerExecutionQuestion(executionId, expectedRevision, questionId, answerText, idempotencyKey(), cid)
       const status = await waitForExecution(client, executionId, cid)
-      let artifact: ArtifactResponse | null = null
-      let versions: ArtifactVersionResponse[] = []
-      if (status.status === 'LLM_RESULT_READY') {
-        artifact = await client.createArtifactFromExecution(executionId, 'ANALYSIS', 'Wynik analizy', idempotencyKey(), cid)
-        artifactByExecution.set(executionId, artifact.artifactId)
-        versions = await client.listArtifactVersions(artifact.artifactId, cid)
-      }
+      const execution = await client.getExecution(executionId, cid)
+      const task = await client.getTask(execution.taskId, cid)
+      const { artifact, versions } = await ensureArtifact(executionId, status, task.taskType, cid)
       const session = await resolveSessionForExecution(client, executionId, cid)
       return { session, execution: status, executionRevision: status.revision, artifact, versions }
     },

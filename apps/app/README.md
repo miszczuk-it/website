@@ -28,11 +28,10 @@ przez `VITE_PLATFORM_API_ENABLED` (bez zmiany UI):
   `expectedRevision`), Artifact Version, Approval. Źródłem prawdy jest zawsze
   backend (`GET /api/sessions/{id}` po Approval, zgodnie z `GAP-010`).
 
-Realny adapter nie ma z czego wyliczyć Artifact po stronie klienta bez
-uprzedniego wywołania `POST /executions/{id}/artifacts` (backend nie
-udostępnia odczytu Artifact po `executionId`) — trzyma więc krótkotrwałą
-mapę `executionId -> artifactId` tylko w pamięci procesu; ginie po
-przeładowaniu strony, tak jak w mocku.
+Realny adapter odzyskuje Artifact z canonical, read-only
+`GET /api/executions/{id}/artifact`, a następnie odczytuje jego wersje.
+Nie używa mapy `executionId -> artifactId` w pamięci jako źródła prawdy,
+więc przeładowanie strony nie gubi Artifact ani jego wersji.
 
 Obraz wdrożeniowy buduje `apps/app/Dockerfile`. Konfiguracja DEV ustawia API na
 `/api`, włącza wywołania Platform API i wyświetla etykietę „Środowisko DEV”.

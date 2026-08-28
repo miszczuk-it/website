@@ -90,6 +90,7 @@ function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformA
     startExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }),
     getExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }),
     getExecutionStatus: async () => BASE_EXECUTION_STATUS,
+    getArtifactByExecution: async () => BASE_ARTIFACT,
     retryExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 6 }),
     createArtifactFromExecution: async () => BASE_ARTIFACT,
     createNextSpecialistTask: async () => ({ contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, taskType: 'PROJECT_PLANNING', status: 'READY', revision: 1 }),

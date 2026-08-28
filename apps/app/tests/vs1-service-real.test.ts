@@ -56,6 +56,7 @@ test('real VS1 adapter drives AUTH -> session list -> create -> answer -> approv
       }
     })() },
     { method: 'POST', path: `/executions/${executionId}/answer`, respond: () => ({ status: 200, body: { contractVersion: '1.0', executionId, status: 'RUNNING', revision: 2, retryAllowed: false, reconcileRequired: false, updatedAt: '2026-08-26T09:01:30Z', pendingQuestion: null } }) },
+    { method: 'GET', path: `/executions/${executionId}/artifact`, respond: () => ({ status: 404, body: { contractVersion: '1.0', errorCode: 'NOT_FOUND', message: 'Nie znaleziono zasobu.', correlationId: 'corr-1' } }) },
     { method: 'POST', path: `/executions/${executionId}/artifacts`, respond: () => ({ status: 201, body: { contractVersion: '1.0', artifactId, projectId, sessionId, taskId, executionId, artifactType: 'ANALYSIS', title: 'Wynik analizy', status: 'READY_FOR_REVIEW', currentVersionId: versionId, revision: 1, createdAt: '2026-08-26T09:02:01Z', updatedAt: '2026-08-26T09:02:01Z' } }) },
     { method: 'GET', path: `/artifacts/${artifactId}`, respond: () => ({ status: 200, body: { contractVersion: '1.0', artifactId, projectId, sessionId, taskId, executionId, artifactType: 'ANALYSIS', title: 'Wynik analizy', status: 'APPROVED', currentVersionId: versionId, revision: 2, createdAt: '2026-08-26T09:02:01Z', updatedAt: '2026-08-26T09:03:00Z' } }) },
     { method: 'GET', path: `/artifacts/${artifactId}/versions`, respond: () => ({ status: 200, body: [{ contractVersion: '1.0', artifactVersionId: versionId, artifactId, versionNumber: 1, sourceAttemptId: null, contentText: 'Odpowiedź: Tylko odczyt.', contentSchemaVersion: '1.0', checksum: 'sha256:x', createdByType: 'SYSTEM', createdByReference: 'attempt:a-1', createdAt: '2026-08-26T09:02:01Z' }] }) },
@@ -126,6 +127,27 @@ test('real VS1 adapter rejects answer() with CONTRACT_MISMATCH when no expectedR
   )
 })
 
+test('real VS1 adapter recovers an Artifact and its versions after a page-reload equivalent without a POST', async () => {
+  const sessionId = 'ses-reload', taskId = 'task-reload', executionId = 'exe-reload', artifactId = 'art-reload', versionId = 'ver-reload'
+  const fetchImpl = fakeFetch([
+    { method: 'GET', path: `/sessions/${sessionId}`, respond: () => ({ status: 200, body: { contractVersion: '1.0', sessionId, projectId: 'prj-reload', ownerId: 'dev-owner', status: 'ACTIVE', revision: 1, createdAt: '2026-08-28T09:00:00Z' } }) },
+    { method: 'GET', path: `/sessions/${sessionId}/tasks`, respond: () => ({ status: 200, body: [{ contractVersion: '1.0', taskId, sessionId, taskType: 'BUSINESS_ANALYSIS', status: 'RUNNING', revision: 2 }] }) },
+    { method: 'GET', path: `/tasks/${taskId}/executions`, respond: () => ({ status: 200, body: [{ contractVersion: '1.0', executionId, taskId, correlationId: 'c-reload', idempotencyKey: 'k-reload', status: 'LLM_RESULT_READY', revision: 2 }] }) },
+    { method: 'GET', path: `/executions/${executionId}/status`, respond: () => ({ status: 200, body: { contractVersion: '1.0', executionId, status: 'LLM_RESULT_READY', revision: 2, retryAllowed: false, reconcileRequired: false, updatedAt: '2026-08-28T09:01:00Z', pendingQuestion: null } }) },
+    { method: 'GET', path: `/executions/${executionId}/artifact`, respond: () => ({ status: 200, body: { contractVersion: '1.0', artifactId, projectId: 'prj-reload', sessionId, taskId, executionId, artifactType: 'ANALYSIS', title: 'Wynik', status: 'READY_FOR_REVIEW', currentVersionId: versionId, revision: 1, createdAt: '2026-08-28T09:01:00Z', updatedAt: '2026-08-28T09:01:00Z' } }) },
+    { method: 'GET', path: `/artifacts/${artifactId}/versions`, respond: () => ({ status: 200, body: [{ contractVersion: '1.0', artifactVersionId: versionId, artifactId, versionNumber: 1, sourceAttemptId: null, contentText: 'Odzyskana wersja.', contentSchemaVersion: '1.0', checksum: 'sha256:reload', createdByType: 'SYSTEM', createdByReference: 'attempt:reload', createdAt: '2026-08-28T09:01:00Z' }] }) },
+  ])
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = fetchImpl
+  try {
+    const detail = await createRealVs1Service(BASE).getDetail(sessionId)
+    assert.equal(detail.artifact?.artifactId, artifactId)
+    assert.equal(detail.versions[0]?.artifactVersionId, versionId)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('real VS1 adapter retry() sends the current revision and a fresh idempotencyKey, then resumes the Artifact flow', async () => {
   const executionId = 'exe-retry', taskId = 'task-retry', sessionId = 'ses-retry', artifactId = 'art-retry', versionId = 'ver-retry'
   const captured: { retryRequestBody: Record<string, unknown> | null } = { retryRequestBody: null }
@@ -137,6 +159,7 @@ test('real VS1 adapter retry() sends the current revision and a fresh idempotenc
     { method: 'GET', path: `/executions/${executionId}/status`, respond: () => ({ status: 200, body: { contractVersion: '1.0', executionId, status: 'LLM_RESULT_READY', revision: 5, isIncomplete: false, incompleteReason: null, retryAllowed: false, reconcileRequired: false, updatedAt: '2026-08-28T09:05:00Z', pendingQuestion: null } }) },
     { method: 'GET', path: `/executions/${executionId}`, respond: () => ({ status: 200, body: { contractVersion: '1.0', executionId, taskId, correlationId: 'c-1', idempotencyKey: 'k-1', status: 'LLM_RESULT_READY', revision: 5 } }) },
     { method: 'GET', path: `/tasks/${taskId}`, respond: () => ({ status: 200, body: { contractVersion: '1.0', taskId, sessionId, taskType: 'PROJECT_PLANNING', status: 'READY', revision: 1 } }) },
+    { method: 'GET', path: `/executions/${executionId}/artifact`, respond: () => ({ status: 404, body: { contractVersion: '1.0', errorCode: 'NOT_FOUND', message: 'Nie znaleziono zasobu.', correlationId: 'corr-1' } }) },
     { method: 'POST', path: `/executions/${executionId}/artifacts`, respond: () => ({ status: 201, body: { contractVersion: '1.0', artifactId, projectId: 'prj-retry', sessionId, taskId, executionId, artifactType: 'PROJECT_PLAN', title: 'Plan projektu', status: 'READY_FOR_REVIEW', currentVersionId: versionId, revision: 1, createdAt: '2026-08-28T09:05:01Z', updatedAt: '2026-08-28T09:05:01Z' } }) },
     { method: 'GET', path: `/artifacts/${artifactId}/versions`, respond: () => ({ status: 200, body: [{ contractVersion: '1.0', artifactVersionId: versionId, artifactId, versionNumber: 1, sourceAttemptId: null, contentText: 'Plan po ponowieniu.', contentSchemaVersion: '1.0', checksum: 'sha256:y', createdByType: 'SYSTEM', createdByReference: 'attempt:a-2', createdAt: '2026-08-28T09:05:01Z' }] }) },
     { method: 'GET', path: `/sessions/${sessionId}`, respond: () => ({ status: 200, body: { contractVersion: '1.0', sessionId, projectId: 'prj-retry', ownerId: 'dev-owner', status: 'ACTIVE', revision: 3, createdAt: '2026-08-28T09:00:00Z' } }) },
