@@ -1,7 +1,7 @@
 import { PlatformApiError } from './safe-error.js'
 import { createPlatformApiClient, type PlatformApiClient } from './platform-api.js'
 import { EXECUTION_POLLING_STATUSES, trackExecutionStatus } from './execution-flow.js'
-import type { ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, EffectiveRole, ExecutionStatusResponse, SessionListItem } from '../types.js'
+import type { ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, SessionListItem } from '../types.js'
 
 export type Vs1Detail = {
   session: SessionListItem
@@ -22,6 +22,14 @@ export interface Vs1Service {
   getDetail(sessionId: string): Promise<Vs1Detail>
   answer(executionId: string, expectedRevision: number | null, questionId: string, answer: string): Promise<Vs1Detail>
   approve(artifact: ArtifactResponse, version: ArtifactVersionResponse): Promise<Vs1Detail>
+  // Creates and starts the next stage of the fixed BA->PM->Developer->QA
+  // specialist chain (specialist-handoff.mjs's NEXT map) from an APPROVED,
+  // non-terminal Artifact. Approval alone never advances the chain -- the
+  // backend requires this as a separate, explicit step
+  // (POST /artifacts/{id}/next-specialist, then starting that Task's
+  // Execution), which had no caller anywhere in this frontend until now
+  // (confirmed as the Local UI / Browser Validation blocker, 2026-08-28).
+  advanceToNextSpecialist(artifactId: string): Promise<Vs1Detail>
 }
 
 const owner: AuthMeResponse = { contractVersion: '1.0', userId: 'usr_owner_demo', displayName: 'Anna Kowalska', effectiveRole: 'OWNER', permissions: ['session.view', 'session.create', 'session.answer_question', 'session.comment', 'session.feedback', 'session.approve', 'session.request_revision', 'session.cancel_own'] }
@@ -75,6 +83,16 @@ export function createMockVs1Service(): Vs1Service {
       detail.session = { ...detail.session, status: 'COMPLETED', revision: detail.session.revision + 1 }
       return refresh(detail)
     },
+    // The mock only ever models a single BUSINESS_ANALYSIS stage (approve()
+    // above always completes the Session immediately) -- it has no next
+    // stage to advance to, so this is a no-op returning the unchanged
+    // detail rather than fabricating a PM/Developer/QA stage the rest of
+    // the mock doesn't understand.
+    async advanceToNextSpecialist(artifactId) {
+      const detail = [...details.values()].find(({ artifact }) => artifact?.artifactId === artifactId)
+      if (!detail) error('NOT_FOUND')
+      return detail
+    },
   }
 }
 
@@ -89,6 +107,16 @@ export function createMockVs1Service(): Vs1Service {
 // same limitation the mock's in-memory Map has.
 const DEFAULT_POLL_INTERVAL_MS = 2_500
 const DEFAULT_POLL_MAX_ATTEMPTS = 8
+
+// One Artifact per specialist stage of the fixed BA->PM->Developer->QA chain
+// (specialist-handoff.mjs's NEXT map) -- used only to label a newly created
+// Artifact; the backend does not validate artifactType against taskType.
+const ARTIFACT_TYPE_BY_TASK_TYPE: Record<string, { artifactType: string; title: string }> = {
+  BUSINESS_ANALYSIS: { artifactType: 'ANALYSIS', title: 'Wynik analizy' },
+  PROJECT_PLANNING: { artifactType: 'PROJECT_PLAN', title: 'Plan projektu' },
+  CODE_IMPLEMENTATION: { artifactType: 'CODE', title: 'Implementacja' },
+  QUALITY_REVIEW: { artifactType: 'QUALITY_REPORT', title: 'Raport jakości' },
+}
 
 async function waitForExecution(client: PlatformApiClient, executionId: string, correlationId: string): Promise<ExecutionStatusResponse> {
   let status = await client.getExecutionStatus(executionId, correlationId)
@@ -134,6 +162,31 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
     return { artifact, versions: await client.listArtifactVersions(artifactId, cid) }
   }
 
+  // A specialist's Execution can reach LLM_RESULT_READY without ever going
+  // through the Question/Answer path (answer() below already creates the
+  // Artifact there). Without this, an Execution that completes directly has
+  // no caller that ever issues POST /executions/{id}/artifacts, so no
+  // Artifact Version ever appears in the UI for it -- confirmed as a real
+  // blocker during Local UI / Browser Validation (2026-08-27/28). Safe to
+  // call repeatedly: if the Artifact was already created by an earlier call
+  // this map has lost track of (e.g. a page reload -- GAP-012), the backend
+  // rejects the retry with ARTIFACT_ALREADY_EXISTS, which is swallowed here
+  // rather than surfaced, since there is still no endpoint to look the
+  // Artifact up by executionId (frontend-backend-contract-pack.md §7).
+  async function ensureArtifact(executionId: string, status: ExecutionStatusResponse, taskType: string, cid: string): Promise<{ artifact: ArtifactResponse | null; versions: ArtifactVersionResponse[] }> {
+    if (artifactByExecution.has(executionId)) return loadArtifact(executionId, cid)
+    if (status.status !== 'LLM_RESULT_READY') return { artifact: null, versions: [] }
+    const meta = ARTIFACT_TYPE_BY_TASK_TYPE[taskType] ?? ARTIFACT_TYPE_BY_TASK_TYPE.BUSINESS_ANALYSIS
+    try {
+      const artifact = await client.createArtifactFromExecution(executionId, meta.artifactType, meta.title, idempotencyKey(), cid)
+      artifactByExecution.set(executionId, artifact.artifactId)
+      return { artifact, versions: await client.listArtifactVersions(artifact.artifactId, cid) }
+    } catch (err) {
+      if (err instanceof PlatformApiError && err.code === 'ARTIFACT_ALREADY_EXISTS') return { artifact: null, versions: [] }
+      throw err
+    }
+  }
+
   return {
     me: () => client.authMe(correlationId()),
     devLogin: (role) => client.devLogin(role, correlationId()),
@@ -149,7 +202,8 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
       const ready = await client.markTaskReady(task.taskId, task.revision, cid)
       const execution = await client.startExecution(ready.taskId, ready.revision, idempotencyKey(), cid)
       const status = await waitForExecution(client, execution.executionId, cid)
-      return { session: started, execution: status, executionRevision: status.revision, artifact: null, versions: [] }
+      const { artifact, versions } = await ensureArtifact(execution.executionId, status, task.taskType, cid)
+      return { session: started, execution: status, executionRevision: status.revision, artifact, versions }
     },
 
     async getDetail(sessionId) {
@@ -162,7 +216,7 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
       const execution = executions[executions.length - 1]
       if (!execution) error('NOT_FOUND')
       const status = await client.getExecutionStatus(execution.executionId, cid)
-      const { artifact, versions } = await loadArtifact(execution.executionId, cid)
+      const { artifact, versions } = await ensureArtifact(execution.executionId, status, task.taskType, cid)
       return { session, execution: status, executionRevision: status.revision, artifact, versions }
     },
 
@@ -193,6 +247,38 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
       const session = await resolveSessionForExecution(client, artifact.executionId, cid)
       const status = await client.getExecutionStatus(artifact.executionId, cid)
       return { session, execution: status, executionRevision: status.revision, artifact: refreshedArtifact, versions }
+    },
+
+    async advanceToNextSpecialist(artifactId) {
+      const cid = correlationId()
+      // createHandoffTask (backend) creates the next specialist's Task
+      // already READY in one atomic step -- only startExecution is still
+      // needed, mirroring createSession()'s own tail above. But a RETRY of
+      // this whole action (e.g. after the first call's polling wait threw
+      // transiently) replays the SAME Task via specialist-handoff.mjs's
+      // lineage lookup, and by then it is no longer READY -- it already has
+      // an Execution from the first, successful startExecution call. Calling
+      // startExecution again on a non-READY Task is rejected by the backend
+      // (assertTaskReadyForExecution -> 409), which is exactly the bug
+      // confirmed live during Local UI / Browser Validation (2026-08-28): a
+      // second click could never reach ensureArtifact at all. Only start a
+      // fresh Execution when the Task is actually still READY; otherwise
+      // reuse its existing (possibly already-finished) one, same as
+      // getDetail() already does for the read-only case.
+      const task = await client.createNextSpecialistTask(artifactId, idempotencyKey(), cid)
+      let execution: ExecutionResponse
+      if (task.status === 'READY') {
+        execution = await client.startExecution(task.taskId, task.revision, idempotencyKey(), cid)
+      } else {
+        const executions = await client.listTaskExecutions(task.taskId, cid)
+        const latest = executions[executions.length - 1]
+        if (!latest) error('NOT_FOUND')
+        execution = latest
+      }
+      const status = await waitForExecution(client, execution.executionId, cid)
+      const { artifact, versions } = await ensureArtifact(execution.executionId, status, task.taskType, cid)
+      const session = await client.getSession(task.sessionId, cid)
+      return { session, execution: status, executionRevision: status.revision, artifact, versions }
     },
   }
 }
