@@ -30,6 +30,13 @@ export interface Vs1Service {
   // Execution), which had no caller anywhere in this frontend until now
   // (confirmed as the Local UI / Browser Validation blocker, 2026-08-28).
   advanceToNextSpecialist(artifactId: string): Promise<Vs1Detail>
+  // Technical retry of a FAILED_RETRYABLE Execution: same Execution, a new
+  // Attempt -- never a new Task/Session. The caller (VerticalSliceWorkspace)
+  // only ever offers this when the backend's own ExecutionStatusResponse
+  // says retryAllowed, so this method does not independently decide which
+  // states are retryable; expectedRevision/idempotencyKey give the backend
+  // its optimistic-concurrency and double-click protection (task §4/§5).
+  retry(executionId: string, expectedRevision: number, reason: string): Promise<Vs1Detail>
 }
 
 const owner: AuthMeResponse = { contractVersion: '1.0', userId: 'usr_owner_demo', displayName: 'Anna Kowalska', effectiveRole: 'OWNER', permissions: ['session.view', 'session.create', 'session.answer_question', 'session.comment', 'session.feedback', 'session.approve', 'session.request_revision', 'session.cancel_own'] }
@@ -92,6 +99,24 @@ export function createMockVs1Service(): Vs1Service {
       const detail = [...details.values()].find(({ artifact }) => artifact?.artifactId === artifactId)
       if (!detail) error('NOT_FOUND')
       return detail
+    },
+    // Mirrors the real backend's own check order (execution-orchestrator.mjs
+    // retryExecution): revision first (CONFLICT), then retryability
+    // (INVALID_TRANSITION) -- so a stale-revision retry is reported as a
+    // conflict even against a non-retryable Execution, same as the real API.
+    async retry(executionId, expectedRevision, reason) {
+      const detail = [...details.values()].find(({ execution }) => execution.executionId === executionId)
+      if (!detail) error('NOT_FOUND')
+      if (!reason.trim()) error('VALIDATION_ERROR')
+      if (detail.executionRevision !== expectedRevision) error('CONFLICT')
+      if (!detail.execution.retryAllowed) error('INVALID_TRANSITION')
+      const artifactId = detail.artifact?.artifactId ?? `art_${detail.session.sessionId.slice(4)}`
+      const versionId = `av_${detail.session.sessionId.slice(4)}_retry`
+      detail.execution = { ...detail.execution, status: 'LLM_RESULT_READY', revision: expectedRevision + 1, isIncomplete: false, incompleteReason: null, retryAllowed: false, updatedAt: new Date().toISOString() }
+      detail.executionRevision = expectedRevision + 1
+      detail.artifact = { contractVersion: '1.0', artifactId, projectId: detail.session.projectId, sessionId: detail.session.sessionId, taskId: `task_${detail.session.sessionId.slice(4)}`, executionId, artifactType: 'ANALYSIS', title: 'Wynik analizy', status: 'READY_FOR_REVIEW', currentVersionId: versionId, revision: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+      detail.versions = [{ contractVersion: '1.0', artifactVersionId: versionId, artifactId, versionNumber: 1, sourceAttemptId: null, contentText: 'Wynik po ponowieniu.', contentSchemaVersion: '1.0', checksum: 'mock', createdByType: 'SYSTEM', createdByReference: 'mock-vs1-retry', createdAt: new Date().toISOString() }]
+      return refresh(detail)
     },
   }
 }
@@ -277,6 +302,17 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
       }
       const status = await waitForExecution(client, execution.executionId, cid)
       const { artifact, versions } = await ensureArtifact(execution.executionId, status, task.taskType, cid)
+      const session = await client.getSession(task.sessionId, cid)
+      return { session, execution: status, executionRevision: status.revision, artifact, versions }
+    },
+
+    async retry(executionId, expectedRevision, reason) {
+      const cid = correlationId()
+      await client.retryExecution(executionId, expectedRevision, reason, idempotencyKey(), cid)
+      const status = await waitForExecution(client, executionId, cid)
+      const execution = await client.getExecution(executionId, cid)
+      const task = await client.getTask(execution.taskId, cid)
+      const { artifact, versions } = await ensureArtifact(executionId, status, task.taskType, cid)
       const session = await client.getSession(task.sessionId, cid)
       return { session, execution: status, executionRevision: status.revision, artifact, versions }
     },

@@ -27,3 +27,32 @@ test('VS1 mock enforces authorization, validation and stale-state errors through
   await assert.rejects(service.answer(detail.execution.executionId, detail.executionRevision, detail.execution.pendingQuestion!.questionId, '  '), (error: unknown) => error instanceof PlatformApiError && error.code === 'VALIDATION_ERROR')
   await assert.rejects(service.answer(detail.execution.executionId, 99, detail.execution.pendingQuestion!.questionId, 'OK'), (error: unknown) => error instanceof PlatformApiError && error.code === 'CONFLICT')
 })
+
+test('VS1 mock retry() rejects a stale revision as CONFLICT and a non-retryable Execution as INVALID_TRANSITION', async () => {
+  const service = createMockVs1Service()
+  await service.devLogin('OWNER')
+  const detail = await service.createSession({ projectName: 'X', goal: 'Y' })
+  // Freshly created Execution is WAITING_FOR_USER_INPUT (retryAllowed: false):
+  // a stale expectedRevision must still surface as CONFLICT before the
+  // backend's own retryable-state check runs, matching the real backend's
+  // check order (assertExpectedRevision before assertExecutionRetryable).
+  await assert.rejects(
+    service.retry(detail.execution.executionId, 99, 'Ponów.'),
+    (error: unknown) => error instanceof PlatformApiError && error.code === 'CONFLICT',
+  )
+  await assert.rejects(
+    service.retry(detail.execution.executionId, detail.executionRevision!, 'Ponów.'),
+    (error: unknown) => error instanceof PlatformApiError && error.code === 'INVALID_TRANSITION',
+  )
+})
+
+test('VS1 mock retry() rejects an unknown Execution as NOT_FOUND and an empty reason as VALIDATION_ERROR', async () => {
+  const service = createMockVs1Service()
+  await service.devLogin('OWNER')
+  await assert.rejects(service.retry('exe-missing', 1, 'Ponów.'), (error: unknown) => error instanceof PlatformApiError && error.code === 'NOT_FOUND')
+  const detail = await service.createSession({ projectName: 'X', goal: 'Y' })
+  await assert.rejects(
+    service.retry(detail.execution.executionId, detail.executionRevision!, '   '),
+    (error: unknown) => error instanceof PlatformApiError && error.code === 'VALIDATION_ERROR',
+  )
+})
