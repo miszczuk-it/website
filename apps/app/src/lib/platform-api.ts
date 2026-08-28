@@ -24,6 +24,7 @@ export type PlatformApiClient = {
   startExecution(taskId: string, expectedTaskRevision: number, idempotencyKey: string, correlationId: string): Promise<ExecutionResponse>
   getExecution(executionId: string, correlationId: string): Promise<ExecutionResponse>
   getExecutionStatus(executionId: string, correlationId: string): Promise<ExecutionStatusResponse>
+  getArtifactByExecution(executionId: string, correlationId: string): Promise<ArtifactResponse>
   retryExecution(executionId: string, expectedRevision: number, reason: string, idempotencyKey: string, correlationId: string): Promise<ExecutionResponse>
   createArtifactFromExecution(executionId: string, artifactType: string, title: string, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
   createNextSpecialistTask(artifactId: string, idempotencyKey: string, correlationId: string): Promise<TaskResponse>
@@ -184,6 +185,7 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
     }, correlationId, 'execution'),
     getExecution: (executionId, correlationId) => call('GET', `/executions/${executionId}`, null, correlationId, 'execution'),
     getExecutionStatus: (executionId, correlationId) => call('GET', `/executions/${executionId}/status`, null, correlationId, 'executionStatus'),
+    getArtifactByExecution: (executionId, correlationId) => callValidated('GET', `/executions/${executionId}/artifact`, null, correlationId, assertArtifact),
     retryExecution: (executionId, expectedRevision, reason, idempotencyKey, correlationId) => call('POST', `/executions/${executionId}/retry`, {
       contractVersion: '1.0', expectedRevision, reason, idempotencyKey,
     }, correlationId, 'execution'),
