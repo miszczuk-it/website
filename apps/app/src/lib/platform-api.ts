@@ -26,6 +26,7 @@ export type PlatformApiClient = {
   getExecutionStatus(executionId: string, correlationId: string): Promise<ExecutionStatusResponse>
   retryExecution(executionId: string, expectedRevision: number, reason: string, idempotencyKey: string, correlationId: string): Promise<ExecutionResponse>
   createArtifactFromExecution(executionId: string, artifactType: string, title: string, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
+  createNextSpecialistTask(artifactId: string, idempotencyKey: string, correlationId: string): Promise<TaskResponse>
   getArtifact(artifactId: string, correlationId: string): Promise<ArtifactResponse>
   listArtifactVersions(artifactId: string, correlationId: string): Promise<ArtifactVersionResponse[]>
   submitArtifactForReview(artifactId: string, expectedRevision: number, artifactVersionId: string, idempotencyKey: string, correlationId: string): Promise<ArtifactResponse>
@@ -189,6 +190,9 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
     createArtifactFromExecution: (executionId, artifactType, title, idempotencyKey, correlationId) => callValidated('POST', `/executions/${executionId}/artifacts`, {
       contractVersion: '1.0', artifactType, title, idempotencyKey,
     }, correlationId, assertArtifact),
+    createNextSpecialistTask: (artifactId, idempotencyKey, correlationId) => call('POST', `/artifacts/${artifactId}/next-specialist`, {
+      contractVersion: '1.0', idempotencyKey,
+    }, correlationId, 'task'),
     getArtifact: (artifactId, correlationId) => callValidated('GET', `/artifacts/${artifactId}`, null, correlationId, assertArtifact),
     listArtifactVersions: (artifactId, correlationId) => callList(`/artifacts/${artifactId}/versions`, correlationId, assertArtifactVersion),
     submitArtifactForReview: (artifactId, expectedRevision, artifactVersionId, idempotencyKey, correlationId) => callValidated('POST', `/artifacts/${artifactId}/submit-for-review`, {
