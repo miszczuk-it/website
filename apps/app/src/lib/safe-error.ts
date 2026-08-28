@@ -31,6 +31,9 @@ const SAFE_MESSAGES: Record<string, string> = {
   GATEWAY_NOT_CONFIGURED: 'Brama wykonawcza nie jest skonfigurowana w tym środowisku.',
   GATEWAY_MOCK_DISABLED: 'Scenariusz testowy bramy jest niedostępny w tym środowisku.',
   IDEMPOTENCY_BLOCKED: 'Powtórzone żądanie z innymi danymi zostało odrzucone.',
+  NOT_ACTIVE_LINEAGE: 'Wybrany etap nie jest już częścią aktywnej ścieżki tej analizy. Odśwież stan i spróbuj ponownie.',
+  NOT_EARLIER_STAGE: 'Można wrócić wyłącznie do wcześniejszego, zakończonego etapu.',
+  LINEAGE_MISMATCH: 'Wybrany etap nie odpowiada wskazanym danym. Odśwież stan i spróbuj ponownie.',
 }
 
 export function toSafeUiError(error: unknown): SafeUiError {

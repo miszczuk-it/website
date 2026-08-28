@@ -100,6 +100,20 @@ function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformA
     createArtifactReviewDecision: async () => BASE_DECISION_ENVELOPE,
     listArtifactReviewDecisions: async () => [BASE_DECISION],
     createArtifactVersion: async () => ({ ...BASE_ARTIFACT, status: 'DRAFT', revision: 4, currentVersionId: NEW_ARTIFACT_VERSION_ID }),
+    createArtifactRevision: async () => ({
+      task: { contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, taskType: 'BUSINESS_ANALYSIS', status: 'RUNNING', revision: 2 },
+      execution: { contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 3 },
+    }),
+    getSessionWorkflow: async () => ({
+      contractVersion: '1.0', sessionId: SESSION_ID, sessionStatus: 'ACTIVE',
+      chain: [{ taskType: 'BUSINESS_ANALYSIS', state: 'CURRENT', activeTask: null, activeArtifact: null, historicalTasks: [] }],
+      currentStageIndex: 0, totalStages: 4, currentSpecialistTaskType: 'BUSINESS_ANALYSIS', nextSpecialistTaskType: 'PROJECT_PLANNING',
+    }),
+    returnToStageRevision: async () => ({
+      task: { contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, taskType: 'PROJECT_PLANNING', status: 'RUNNING', revision: 2 },
+      session: { contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, ownerId: 'usr_owner', status: 'ACTIVE', revision: 2, createdAt: '2026-08-26T09:00:00Z' },
+      execution: { contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 3 },
+    }),
     ...overrides,
   }
 }
