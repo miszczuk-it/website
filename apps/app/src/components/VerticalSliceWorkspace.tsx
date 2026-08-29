@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { EffectiveRole, ExecutionStatusResponse, SessionWorkflowResponse } from '../types.js'
+import type { AuthMeResponse, ExecutionStatusResponse, SessionWorkflowResponse } from '../types.js'
 import { runGuarded, type SingleFlightGuard } from '../lib/execution-flow.js'
 import { PlatformApiError, toSafeUiError } from '../lib/safe-error.js'
 import { createMockVs1Service, createRealVs1Service, type Vs1Detail, type Vs1Service } from '../lib/vs1-service.js'
@@ -31,11 +31,10 @@ export function ExecutionRetryStatus({ execution, retrying, onRetry }: Execution
 // analysis renders through AnalysisDetail's workflow-progress /
 // current-specialist / result-by-stage / revision-navigation layout instead
 // of the previous flat, GUID-labelled single panel.
-type Props = { apiBaseUrl: string; apiEnabled: boolean; appEnvironment: string }
-export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, appEnvironment }: Props) {
+type Props = { apiBaseUrl: string; apiEnabled: boolean; appEnvironment: string; identity?: AuthMeResponse | null; onLogout?: () => Promise<void> }
+export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initialIdentity = null, onLogout }: Props) {
   const service = useMemo<Vs1Service>(() => apiEnabled ? createRealVs1Service(apiBaseUrl) : createMockVs1Service(), [apiBaseUrl, apiEnabled])
-  const dev = appEnvironment !== 'PRODUCTION'
-  const [role, setRole] = useState<EffectiveRole>('OWNER'); const [user, setUser] = useState<string | null>(null)
+  const [user, setUser] = useState<AuthMeResponse | null>(initialIdentity)
   const [sessions, setSessions] = useState<Vs1Detail['session'][]>([])
   const [detail, setDetail] = useState<Vs1Detail | null>(null)
   const [workflow, setWorkflow] = useState<SessionWorkflowResponse | null>(null)
@@ -103,16 +102,18 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, appEnvironment 
       setRetrying(false)
     }
   }
-  useEffect(() => { service.me().then(async (me) => { setUser(me.displayName); setSessions(await service.listSessions()) }).catch(() => undefined) }, [service])
+  useEffect(() => { service.me().then(async (me) => { setUser(me); setSessions(await service.listSessions()) }).catch(() => undefined) }, [service])
 
-  if (!user) return <main className="app-shell"><section className="panel"><p className="eyebrow">AUTH-01</p><h1>Logowanie</h1><p>Zaloguj się przez Microsoft, aby kontynuować.</p><button className="primary" type="button" onClick={() => setNotice('Logowanie Microsoft jest realizowane przez granicę Entra adaptera.')}>Zaloguj przez Microsoft</button>{dev && <div className="panel"><h2>Tryb deweloperski</h2><label>Rola<select value={role} onChange={(event) => setRole(event.target.value as EffectiveRole)}><option>OWNER</option><option>OBSERVER</option><option>ADMIN</option></select></label><button className="primary" type="button" onClick={() => service.devLogin(role).then((me) => { setUser(me.displayName); return load() }).catch(report)}>Zaloguj lokalnie</button></div>}{notice && <p className="notice">{notice}</p>}</section></main>
+  if (!user) return <main className="app-shell"><section className="panel"><h1>Sesja wygasła</h1><p>Zaloguj się ponownie, aby kontynuować.</p></section></main>
 
   return <main className="app-shell">
     <header className="hero">
       <p className="eyebrow">AI Platform</p>
       <h1>Moje analizy</h1>
-      <p>Zalogowano: {user}.</p>
-      <button type="button" onClick={() => service.logout().then(() => { setUser(null); setDetail(null); setWorkflow(null) }).catch(report)}>Wyloguj</button>
+      <div className="user-menu">
+        {user.picture ? <img className="user-avatar" src={user.picture} alt="" /> : <span className="user-avatar user-avatar-fallback" aria-hidden="true">{user.displayName.slice(0, 1).toUpperCase()}</span>}
+        <details><summary>{user.displayName}</summary><div className="user-menu-content"><span>Profil</span><button type="button" onClick={() => (onLogout ? onLogout() : service.logout()).then(() => { setUser(null); setDetail(null); setWorkflow(null) }).catch(report)}>Wyloguj</button></div></details>
+      </div>
     </header>
     {notice && <p className="notice" role="alert">{notice}</p>}
 
