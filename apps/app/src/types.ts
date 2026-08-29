@@ -39,6 +39,7 @@ export type AuthMeResponse = {
   contractVersion: '1.0'
   userId: string
   displayName: string
+  picture?: string | null
   effectiveRole: EffectiveRole
   permissions: string[]
 }
