@@ -35,6 +35,34 @@ export type MvpFlowState = {
 export type ProjectResponse = { contractVersion: '1.0'; projectId: string; status: 'ACTIVE' | 'ARCHIVED'; revision: number }
 export type SessionStatus = 'CREATED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'ARCHIVED'
 export type SessionResponse = { contractVersion: '1.0'; sessionId: string; projectId: string; status: SessionStatus; revision: number }
+export type AnalysisContextResponse = { contractVersion: '1.0'; analysisContextVersionId: string; versionNumber: number; entries: Array<{ section: string; classification: string; status: string; content: string }> }
+
+// ADR-009 (GAP-018): Settings -> Specjaliści. GET /api/specialist-profiles
+// lists one row per fixed specialist type with its currently ACTIVE
+// version number; GET .../versions lists the full DRAFT/ACTIVE/SUPERSEDED
+// history for one type. The system prompt is real content here (unlike
+// everywhere else in this app, which never exposes it) -- this screen is
+// exactly the place an Owner edits it.
+export type SpecialistProfileResponse = { specialistType: SpecialistTaskType; name: string; activeVersion: number | null }
+export type SpecialistProfileVersionStatus = 'DRAFT' | 'ACTIVE' | 'SUPERSEDED'
+export type SpecialistProfileVersionResponse = {
+  specialistProfileVersionId: string
+  specialistType: SpecialistTaskType
+  versionNumber: number
+  status: SpecialistProfileVersionStatus
+  systemPrompt: string
+  responsibilities: string
+  excludedResponsibilities: string
+  expectedOutputGuidance: string
+  modelProfileKey: string
+}
+export type SpecialistProfileVersionCreateInput = {
+  systemPrompt: string
+  responsibilities?: string
+  excludedResponsibilities?: string
+  expectedOutputGuidance?: string
+  modelProfileKey?: string
+}
 export type EffectiveRole = 'OWNER' | 'OBSERVER' | 'ADMIN'
 export type AuthMeResponse = {
   contractVersion: '1.0'

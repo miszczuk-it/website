@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ArtifactDecisionType, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse } from '../types.js'
+import { artifactContent, artifactExportName, artifactMarkdown, downloadText } from '../lib/artifact-export.js'
 
 const DECISIONS_REQUIRING_COMMENT: ArtifactDecisionType[] = ['REJECT', 'REQUEST_REVISION', 'COMMENT_ONLY']
 
@@ -42,6 +43,7 @@ export function ArtifactReviewPanel({
   onDecide,
 }: Props) {
   const [comment, setComment] = useState('')
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
 
   const currentVersion = versions.find((version) => version.artifactVersionId === artifact.currentVersionId) ?? null
   const selectedVersion = versions.find((version) => version.artifactVersionId === selectedVersionId) ?? currentVersion
@@ -57,6 +59,16 @@ export function ArtifactReviewPanel({
     if (DECISIONS_REQUIRING_COMMENT.includes(decisionType) && comment.trim() === '') return
     onDecide(decisionType, comment.trim(), selectedVersion.artifactVersionId)
     setComment('')
+  }
+
+  async function copySelectedVersion() {
+    if (!selectedVersion) return
+    try {
+      await navigator.clipboard.writeText(artifactContent(selectedVersion))
+      setCopyNotice('Skopiowano')
+    } catch {
+      setCopyNotice('Nie udało się skopiować wyniku.')
+    }
   }
 
   return (
@@ -99,6 +111,12 @@ export function ArtifactReviewPanel({
 
       {selectedVersion && (
         <div className="artifact-version-content">
+          <div className="artifact-export-actions">
+            <button type="button" onClick={() => void copySelectedVersion()}>Kopiuj</button>
+            <button type="button" onClick={() => downloadText(artifactMarkdown(artifact, selectedVersion), artifactExportName(artifact, selectedVersion, 'md'), 'text/markdown')}>Pobierz .md</button>
+            <button type="button" onClick={() => downloadText(artifactContent(selectedVersion), artifactExportName(artifact, selectedVersion, 'txt'), 'text/plain')}>Pobierz .txt</button>
+          </div>
+          {copyNotice && <p role="status" className={copyNotice === 'Skopiowano' ? 'success-message' : undefined}>{copyNotice}</p>}
           {typeof selectedVersion.contentText === 'string' && <pre>{selectedVersion.contentText}</pre>}
           {selectedVersion.contentJson && <pre>{JSON.stringify(selectedVersion.contentJson, null, 2)}</pre>}
         </div>

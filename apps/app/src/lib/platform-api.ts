@@ -1,7 +1,8 @@
 import { PlatformApiError } from './safe-error.js'
 import type {
   ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionEnvelope, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
-  AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionListItem, SessionResponse, SessionWorkflowResponse, TaskResponse,
+  AnalysisContextResponse, AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionListItem, SessionResponse, SessionWorkflowResponse, TaskResponse,
+  SpecialistProfileResponse, SpecialistProfileVersionCreateInput, SpecialistProfileVersionResponse, SpecialistTaskType,
 } from '../types.js'
 
 type FetchLike = typeof fetch
@@ -41,6 +42,12 @@ export type PlatformApiClient = {
   createArtifactRevision(artifactId: string, feedback: string, idempotencyKey: string, correlationId: string): Promise<{ task: TaskResponse; execution: ExecutionResponse }>
   // GAP-015: server-computed active lineage of the fixed 4-stage chain.
   getSessionWorkflow(sessionId: string, correlationId: string): Promise<SessionWorkflowResponse>
+  getSessionContext?(sessionId: string, correlationId: string): Promise<AnalysisContextResponse>
+  // ADR-009 (GAP-018): Settings -> Specjaliści.
+  listSpecialistProfiles(correlationId: string): Promise<SpecialistProfileResponse[]>
+  listSpecialistProfileVersions(specialistType: SpecialistTaskType, correlationId: string): Promise<SpecialistProfileVersionResponse[]>
+  createSpecialistProfileVersion(specialistType: SpecialistTaskType, input: SpecialistProfileVersionCreateInput, correlationId: string): Promise<SpecialistProfileVersionResponse>
+  activateSpecialistProfileVersion(specialistType: SpecialistTaskType, versionId: string, correlationId: string): Promise<SpecialistProfileVersionResponse>
   // GAP-015: return to an earlier, already-APPROVED stage.
   returnToStageRevision(sessionId: string, targetTaskId: string, feedback: string, expectedRevision: number, idempotencyKey: string, correlationId: string): Promise<{ task: TaskResponse; session: SessionListItem; execution: ExecutionResponse }>
 }
@@ -121,6 +128,22 @@ function assertArtifactDecisionEnvelope(value: unknown): ArtifactReviewDecisionE
     throw new PlatformApiError('INVALID_RESPONSE')
   }
   return { contractVersion: '1.0', reviewDecision: assertArtifactDecision(value.reviewDecision), triggeredExecutionId: value.triggeredExecutionId as string | null }
+}
+
+function assertSpecialistProfile(value: unknown): SpecialistProfileResponse {
+  if (!isRecord(value) || typeof value.specialistType !== 'string' || typeof value.name !== 'string'
+    || (value.activeVersion !== null && !Number.isInteger(value.activeVersion))) {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as SpecialistProfileResponse
+}
+
+function assertSpecialistProfileVersion(value: unknown): SpecialistProfileVersionResponse {
+  if (!isRecord(value) || typeof value.specialistProfileVersionId !== 'string' || typeof value.specialistType !== 'string'
+    || !Number.isInteger(value.versionNumber) || typeof value.status !== 'string') {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as SpecialistProfileVersionResponse
 }
 
 function assertWorkflow(value: unknown): SessionWorkflowResponse {
@@ -239,8 +262,18 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
       contractVersion: '1.0', idempotencyKey, feedback,
     }, correlationId, assertTaskExecutionEnvelope),
     getSessionWorkflow: (sessionId, correlationId) => callValidated('GET', `/sessions/${sessionId}/workflow`, null, correlationId, assertWorkflow),
+    getSessionContext: (sessionId, correlationId) => callValidated('GET', `/sessions/${sessionId}/context`, null, correlationId, (value) => {
+      if (!isRecord(value) || value.contractVersion !== '1.0' || !Number.isInteger(value.versionNumber) || !Array.isArray(value.entries)) throw new PlatformApiError('INVALID_RESPONSE')
+      return value as unknown as AnalysisContextResponse
+    }),
     returnToStageRevision: (sessionId, targetTaskId, feedback, expectedRevision, idempotencyKey, correlationId) => callValidated('POST', `/sessions/${sessionId}/revisions/return-to-stage`, {
       contractVersion: '1.0', targetTaskId, feedback, expectedRevision, idempotencyKey,
     }, correlationId, assertReturnToStageEnvelope),
+    listSpecialistProfiles: (correlationId) => callList('/specialist-profiles', correlationId, assertSpecialistProfile),
+    listSpecialistProfileVersions: (specialistType, correlationId) => callList(`/specialist-profiles/${specialistType}/versions`, correlationId, assertSpecialistProfileVersion),
+    createSpecialistProfileVersion: (specialistType, input, correlationId) => callValidated('POST', `/specialist-profiles/${specialistType}/versions`, {
+      contractVersion: '1.0', ...input,
+    }, correlationId, assertSpecialistProfileVersion),
+    activateSpecialistProfileVersion: (specialistType, versionId, correlationId) => callValidated('POST', `/specialist-profiles/${specialistType}/versions/${versionId}/activate`, null, correlationId, assertSpecialistProfileVersion),
   }
 }

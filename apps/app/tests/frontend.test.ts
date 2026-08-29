@@ -115,6 +115,13 @@ function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformA
       session: { contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, ownerId: 'usr_owner', status: 'ACTIVE', revision: 2, createdAt: '2026-08-26T09:00:00Z' },
       execution: { contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 3 },
     }),
+    // ADR-009 / GAP-018: Settings -> Specjaliści -- not exercised by any
+    // scenario in this file (frontend.test.ts covers the VS1 golden path),
+    // so these are stubs only, present to satisfy PlatformApiClient's shape.
+    listSpecialistProfiles: async () => [],
+    listSpecialistProfileVersions: async () => [],
+    createSpecialistProfileVersion: async (specialistType) => ({ specialistProfileVersionId: 'stub', specialistType, versionNumber: 1, status: 'DRAFT', systemPrompt: '', responsibilities: '', excludedResponsibilities: '', expectedOutputGuidance: '', modelProfileKey: 'default' }),
+    activateSpecialistProfileVersion: async (specialistType) => ({ specialistProfileVersionId: 'stub', specialistType, versionNumber: 1, status: 'ACTIVE', systemPrompt: '', responsibilities: '', excludedResponsibilities: '', expectedOutputGuidance: '', modelProfileKey: 'default' }),
     ...overrides,
   }
 }

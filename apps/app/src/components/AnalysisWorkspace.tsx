@@ -6,9 +6,10 @@ import { createPlatformApiClient, type PlatformApiClient } from '../lib/platform
 import { PlatformApiError, toSafeUiError, type SafeUiError } from '../lib/safe-error.js'
 import { validateAnalysisForm, type FormErrors } from '../lib/validation.js'
 import { ArtifactReviewPanel } from './ArtifactReviewPanel.js'
+import { downloadText, sanitizeFileName } from '../lib/artifact-export.js'
 import type {
   AnalysisFormValues, ArtifactDecisionType, ArtifactResponse, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
-  ExecutionResponse, ExecutionStatus, ExecutionStatusResponse, FlowStep, MvpFlowState,
+  AnalysisContextResponse, ExecutionResponse, ExecutionStatus, ExecutionStatusResponse, FlowStep, MvpFlowState,
 } from '../types.js'
 
 const EMPTY_FORM: AnalysisFormValues = { projectName: '', goal: '', taskDescription: '' }
@@ -96,6 +97,7 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
   const [revisionError, setRevisionError] = useState<string | null>(null)
   const [versionNotice, setVersionNotice] = useState<string | null>(null)
   const [artifactSafeError, setArtifactSafeError] = useState<SafeUiError | null>(null)
+  const [analysisContext, setAnalysisContext] = useState<AnalysisContextResponse | null>(null)
   const submitting = useRef(false)
   const startGuard = useRef<SingleFlightGuard>({ busy: false })
   const retryGuard = useRef<SingleFlightGuard>({ busy: false })
@@ -116,6 +118,10 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
 
   // Stop polling on unmount -- no orphaned intervals outliving the view.
   useEffect(() => () => { pollController.current?.stop(); revisionPollController.current?.stop() }, [])
+  useEffect(() => {
+    if (!flow?.sessionId || !apiEnabled || !client.getSessionContext) return
+    void client.getSessionContext(flow.sessionId, flow.correlationId).then(setAnalysisContext).catch(() => setAnalysisContext(null))
+  }, [apiEnabled, client, flow?.correlationId, flow?.sessionId])
 
   function updateField(field: keyof AnalysisFormValues, value: string) {
     setValues((current) => ({ ...current, [field]: value }))
@@ -381,6 +387,19 @@ export function AnalysisWorkspace({ apiBaseUrl, apiEnabled, appEnvironment = 'LO
           </>
         )}
       </section>
+
+      {analysisContext && (
+        <section className="panel" aria-labelledby="analysis-context-title">
+          <h2 id="analysis-context-title">Kontekst analizy</h2>
+          <p>Wersja kontekstu: v{analysisContext.versionNumber}</p>
+          <div className="artifact-export-actions">
+            <button type="button" onClick={() => void navigator.clipboard.writeText(analysisContext.entries.filter((entry) => entry.classification !== 'AGENT_PROPOSED' && entry.status === 'ACTIVE').map((entry) => `## ${entry.section}\n${entry.content}`).join('\n\n'))}>Kopiuj kontekst</button>
+            <button type="button" onClick={() => downloadText(`# Kontekst analizy — ${values.projectName}\n\nWersja kontekstu: v${analysisContext.versionNumber}\n\n${analysisContext.entries.filter((entry) => entry.classification !== 'AGENT_PROPOSED' && entry.status === 'ACTIVE').map((entry) => `## ${entry.section}\n${entry.content}`).join('\n\n')}`, `${sanitizeFileName(values.projectName)}_kontekst.md`, 'text/markdown')}>Pobierz kontekst</button>
+            {flow?.sessionId && <a className="button" href={`${apiBaseUrl.replace(/\/$/, '')}/sessions/${flow.sessionId}/export`}>Pobierz wyniki analizy</a>}
+          </div>
+          {analysisContext.entries.filter((entry) => entry.classification !== 'AGENT_PROPOSED' && entry.status === 'ACTIVE').map((entry, index) => <div key={`${entry.section}-${index}`}><h3>{entry.section}</h3><p>{entry.content}</p></div>)}
+        </section>
+      )}
 
       {executionStatus?.status === 'LLM_RESULT_READY' && (
         <section className="panel" aria-labelledby="artifact-review-title">
