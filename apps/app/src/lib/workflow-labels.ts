@@ -25,10 +25,35 @@ export const SESSION_STATUS_LABELS: Record<SessionResponse['status'], string> = 
   ACTIVE: 'W toku',
   COMPLETED: 'Zakończona',
   CANCELLED: 'Anulowana',
+  ARCHIVED: 'Zarchiwizowana',
 }
 
 export const STAGE_STATE_ICON: Record<'COMPLETED' | 'CURRENT' | 'UPCOMING', string> = {
   COMPLETED: '✓',
   CURRENT: '●',
   UPCOMING: '○',
+}
+
+// Owner UX Follow-up (GAP-017): server-owned cost, USD only for now (task
+// §16 -- no PLN conversion without a real exchange rate). null/undefined
+// (never dispatched, or provider usage not yet settled) renders as an
+// em-dash, never "$NaN"/"undefined".
+export function formatUsd(costUsd: number | null | undefined): string {
+  if (costUsd === null || costUsd === undefined || Number.isNaN(costUsd)) return '—'
+  return `$${costUsd.toFixed(4)}`
+}
+
+// Distinguishes the two revision kinds in the language of §24 of the task:
+// returnToStageSourceArtifactId set => the Task was created by "Wróć do
+// wcześniejszego etapu"; revisionOfTaskId set without it => "Poproś o
+// poprawę" on the same stage. Neither set => not a revision at all.
+export type RevisionKind = 'CURRENT_STAGE_REVISION' | 'RETURN_TO_STAGE' | null
+export function revisionKindOf(task: { revisionOfTaskId?: string | null; returnToStageSourceArtifactId?: string | null }): RevisionKind {
+  if (task.returnToStageSourceArtifactId) return 'RETURN_TO_STAGE'
+  if (task.revisionOfTaskId) return 'CURRENT_STAGE_REVISION'
+  return null
+}
+export const REVISION_KIND_LABELS: Record<Exclude<RevisionKind, null>, string> = {
+  CURRENT_STAGE_REVISION: 'Poprawa bieżącego etapu',
+  RETURN_TO_STAGE: 'Powrót do wcześniejszego etapu',
 }

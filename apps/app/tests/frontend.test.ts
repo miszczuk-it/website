@@ -85,6 +85,7 @@ function successfulClient(overrides: Partial<PlatformApiClient> = {}): PlatformA
     createProject: async () => ({ contractVersion: '1.0', projectId: PROJECT_ID, status: 'ACTIVE', revision: 0 }),
     createSession: async () => ({ contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, status: 'CREATED', revision: 0 }),
     startSession: async () => ({ contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, status: 'ACTIVE', revision: 1 }),
+    archiveSession: async () => ({ contractVersion: '1.0', sessionId: SESSION_ID, projectId: PROJECT_ID, status: 'ARCHIVED', revision: 2 }),
     createTask: async () => ({ contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, taskType: 'BUSINESS_ANALYSIS', status: 'CREATED', revision: 0 }),
     markTaskReady: async () => ({ contractVersion: '1.0', taskId: TASK_ID, sessionId: SESSION_ID, taskType: 'BUSINESS_ANALYSIS', status: 'READY', revision: 1 }),
     startExecution: async () => ({ contractVersion: '1.0', executionId: EXECUTION_ID, taskId: TASK_ID, correlationId: 'correlation', idempotencyKey: 'key', status: 'WAITING_FOR_LLM_GATEWAY', revision: 2 }),

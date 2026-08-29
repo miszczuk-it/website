@@ -42,6 +42,33 @@ Plik `.env.example` pozostawia API wyłączone (`false`). Lokalne DEV i testy
 integracyjne mogą jawnie ustawić `true`. Zmienne Vite są publiczną konfiguracją
 bundla i nie mogą zawierać sekretów.
 
+## Owner UX Follow-up (GAP-017): usuwanie, koszt, historia feedbacku, podgląd
+
+Rozszerzenie `Vs1Service`/`AnalysisList`/`AnalysisDetail` o cztery
+funkcje zgłoszone przez Ownera po realnym DEV teście:
+
+- **Usuwanie analizy** — menu „⋯” przy pozycji na liście, potwierdzenie
+  przez współdzielony `ConfirmDialog` (`src/components/ConfirmDialog.tsx`,
+  natywny `<dialog>`, pierwszy tego typu wzorzec w repo), następnie
+  `Vs1Service.archiveSession()` → `POST /api/sessions/{id}/archive`
+  (soft-delete po stronie backendu — historia/audyt/koszt zachowane).
+  Widoczne tylko gdy `identity.permissions` zawiera
+  `session.archive_own`/`session.archive_any`.
+- **Koszt** — `AnalysisDetail` renderuje `analysisTotalCostUsd`,
+  `stageCostUsd` i per-rewizja `costUsd` bezpośrednio z
+  `GET /api/sessions/{id}/workflow` (`formatUsd()` w
+  `src/lib/workflow-labels.ts`; `null`/`undefined` → „—”, nigdy
+  `$NaN`/`undefined`). Frontend nie liczy kosztu z tokenów lokalnie.
+- **Powód rewizji w historii** — `revisionReason` z tej samej odpowiedzi,
+  z odznaką „Poprawa bieżącego etapu” lub „Powrót do wcześniejszego
+  etapu” (`revisionKindOf()`/`REVISION_KIND_LABELS`, na podstawie
+  `returnToStageSourceArtifactId`).
+- **Read-only podgląd** — przycisk „Podgląd” przy każdej wersji w
+  historii woła `Vs1Service.getArtifactPreview(artifactId)` (reużywa
+  istniejące `GET /api/artifacts/{id}` + `.../versions`, zero nowego
+  endpointu) i renderuje treść bez żadnych akcji mutujących, z „← Wróć
+  do aktualnego etapu”.
+
 ## Sekwencja
 
 Formularz wykonuje po kolei:

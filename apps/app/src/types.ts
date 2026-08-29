@@ -33,7 +33,8 @@ export type MvpFlowState = {
 }
 
 export type ProjectResponse = { contractVersion: '1.0'; projectId: string; status: 'ACTIVE' | 'ARCHIVED'; revision: number }
-export type SessionResponse = { contractVersion: '1.0'; sessionId: string; projectId: string; status: 'CREATED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'; revision: number }
+export type SessionStatus = 'CREATED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'ARCHIVED'
+export type SessionResponse = { contractVersion: '1.0'; sessionId: string; projectId: string; status: SessionStatus; revision: number }
 export type EffectiveRole = 'OWNER' | 'OBSERVER' | 'ADMIN'
 export type AuthMeResponse = {
   contractVersion: '1.0'
@@ -65,6 +66,26 @@ export type TaskResponse = {
   title?: string
   description?: string
   revisionOfTaskId?: string | null
+  // Owner UX Follow-up (GAP-017): only populated on Task entries embedded in
+  // SessionWorkflowResponse.chain[] (activeTask/historicalTasks) -- absent
+  // (not just null) on every other endpoint that returns a raw TaskResponse.
+  // costUsd sums every Attempt of every Execution of this one Task (retries
+  // included); undefined/never-set in the source map means "never
+  // dispatched", which is distinct from a real $0 settlement.
+  costUsd?: number | null
+  // The human feedback that caused this Task to be created as a revision --
+  // read back from its own CREATE audit event's `reason` (server-owned,
+  // persisted since this Task was created, not a frontend-only value).
+  revisionReason?: string | null
+  // Already existed on Task (migration 062) but was not exposed to the
+  // frontend until now. Set => this Task is a RETURN_TO_STAGE revision
+  // ("Powrót do wcześniejszego etapu"); unset with revisionOfTaskId set =>
+  // CURRENT_STAGE_REVISION ("Poprawa bieżącego etapu").
+  returnToStageSourceArtifactId?: string | null
+  // The Artifact this Task produced, if any -- lets the frontend fetch a
+  // historical Task's read-only content via the existing GET
+  // /artifacts/{id} + GET /artifacts/{id}/versions endpoints.
+  artifactId?: string | null
 }
 
 // GAP-015: GET /api/sessions/:id/workflow -- the server-computed active
@@ -77,16 +98,25 @@ export type SessionWorkflowStage = {
   activeTask: TaskResponse | null
   activeArtifact: ArtifactResponse | null
   historicalTasks: TaskResponse[]
+  // Owner UX Follow-up (GAP-017): sum of activeTask.costUsd + every
+  // historicalTasks[].costUsd for this one stage. null, not 0, when none of
+  // this stage's Tasks have a settled Attempt yet.
+  stageCostUsd?: number | null
 }
 export type SessionWorkflowResponse = {
   contractVersion: '1.0'
   sessionId: string
-  sessionStatus: 'CREATED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'
+  sessionStatus: SessionStatus
   chain: SessionWorkflowStage[]
   currentStageIndex: number
   totalStages: number
   currentSpecialistTaskType: SpecialistTaskType | null
   nextSpecialistTaskType: SpecialistTaskType | null
+  // Owner UX Follow-up (GAP-017): server-owned sum across the whole
+  // analysis (every stage, revision, retry) -- the frontend never computes
+  // cost from tokens locally. null when nothing has settled yet.
+  analysisTotalCostUsd?: number | null
+  costCurrency?: string | null
 }
 
 export type ExecutionStatus = 'CREATED' | 'BUILDING_CONTEXT' | 'WAITING_FOR_LLM_GATEWAY' | 'WAITING_FOR_USER_INPUT' | 'RUNNING' | 'LLM_RESULT_READY' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_FINAL' | 'CANCELLED' | 'UNKNOWN'

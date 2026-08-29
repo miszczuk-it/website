@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import type { SessionWorkflowStage } from '../types.js'
+import type { ArtifactResponse, ArtifactVersionResponse, SessionWorkflowStage, TaskResponse } from '../types.js'
 import type { Vs1Detail } from '../lib/vs1-service.js'
-import { SESSION_STATUS_LABELS, SPECIALIST_LABELS, STAGE_LABELS, STAGE_ORDER, STAGE_STATE_ICON } from '../lib/workflow-labels.js'
+import { formatUsd, REVISION_KIND_LABELS, revisionKindOf, SESSION_STATUS_LABELS, SPECIALIST_LABELS, STAGE_LABELS, STAGE_ORDER, STAGE_STATE_ICON } from '../lib/workflow-labels.js'
 import { ExecutionRetryStatus } from './VerticalSliceWorkspace.js'
 
 // §25 of the VS1 UX redesign task: the open-analysis layout is
@@ -9,6 +9,7 @@ import { ExecutionRetryStatus } from './VerticalSliceWorkspace.js'
 // current result + actions -> history. No raw sessionId/taskId/executionId/
 // artifactId in the main UX (§26) -- those move into a collapsed
 // "Szczegóły techniczne" section at the bottom.
+type ArtifactPreview = { artifact: ArtifactResponse; versions: ArtifactVersionResponse[] }
 type Props = {
   detail: Vs1Detail
   workflowResponse: import('../types.js').SessionWorkflowResponse | null
@@ -21,6 +22,12 @@ type Props = {
   onAdvance: () => void
   onRetry: () => void
   onReturnToStage: (targetTaskId: string, feedback: string) => void
+  // Owner UX Follow-up (GAP-017, Feature 4): read-only historical result
+  // preview. `preview` is fetched/held by the parent (VerticalSliceWorkspace,
+  // same pattern as `workflowResponse`); onPreview(artifactId) requests it.
+  preview: ArtifactPreview | null
+  onPreview: (artifactId: string) => void
+  onClosePreview: () => void
 }
 
 function StageRow({ stage }: { stage: SessionWorkflowStage }) {
@@ -32,7 +39,50 @@ function StageRow({ stage }: { stage: SessionWorkflowStage }) {
   </li>
 }
 
-export function AnalysisDetail({ detail, workflowResponse, busy, retrying, onBack, onAnswer, onApprove, onRequestRevision, onAdvance, onRetry, onReturnToStage }: Props) {
+// Owner UX Follow-up (GAP-017 §28): a historical/completed Artifact's own
+// status is the readable "STATUS" line in the read-only preview -- server-
+// owned, not re-derived from workflow state the preview screen deliberately
+// does not carry.
+const ARTIFACT_STATUS_LABELS: Record<ArtifactResponse['status'], string> = {
+  DRAFT: 'Wersja robocza',
+  READY_FOR_REVIEW: 'Oczekuje na decyzję',
+  APPROVED: 'Zatwierdzona',
+  REJECTED: 'Odrzucona',
+  REVISION_REQUESTED: 'Zwrócona do poprawy',
+  ARCHIVED: 'Zarchiwizowana',
+}
+
+function ArtifactPreviewPanel({ preview, onClosePreview }: { preview: ArtifactPreview; onClosePreview: () => void }) {
+  const { artifact, versions } = preview
+  const version = versions.find((entry) => entry.artifactVersionId === artifact.currentVersionId) ?? versions[versions.length - 1]
+  return <section className="panel analysis-detail">
+    <button type="button" className="back-link" onClick={onClosePreview}>← Wróć do aktualnego etapu</button>
+    <h2>{artifact.title}</h2>
+    <p className="preview-status"><span className="status">{ARTIFACT_STATUS_LABELS[artifact.status]}</span></p>
+    <div className="artifact-version-content"><pre>{version?.contentText ?? (version?.contentJson ? JSON.stringify(version.contentJson, null, 2) : 'Brak treści')}</pre></div>
+    <p className="notice-inline">To jest wyłącznie podgląd — bez możliwości edycji ani decyzji.</p>
+  </section>
+}
+
+// Owner UX Follow-up (GAP-017 §12/§30): one compact row per Task-level
+// revision (activeTask or a historicalTasks[] entry) -- cost, and if this
+// Task was itself created as a revision, why.
+function HistoryEntry({ task, versionLabel, onPreview }: { task: TaskResponse; versionLabel: string; onPreview: (artifactId: string) => void }) {
+  const kind = revisionKindOf(task)
+  return <li className="history-entry">
+    <div className="history-entry-head">
+      <span>{versionLabel}</span>
+      <span className="history-entry-cost">{formatUsd(task.costUsd)}</span>
+      {task.artifactId && <button type="button" className="history-preview-button" onClick={() => onPreview(task.artifactId!)}>Podgląd</button>}
+    </div>
+    {kind && <div className="history-entry-feedback">
+      <span className={`revision-kind-badge revision-kind-${kind.toLowerCase()}`}>{REVISION_KIND_LABELS[kind]}</span>
+      {task.revisionReason && <p>Powód: „{task.revisionReason}”</p>}
+    </div>}
+  </li>
+}
+
+export function AnalysisDetail({ detail, workflowResponse, busy, retrying, onBack, onAnswer, onApprove, onRequestRevision, onAdvance, onRetry, onReturnToStage, preview, onPreview, onClosePreview }: Props) {
   const [answer, setAnswer] = useState('Wyłącznie odczyt danych.')
   const [revisionFeedback, setRevisionFeedback] = useState('')
   const [revisionFormOpen, setRevisionFormOpen] = useState(false)
@@ -40,6 +90,8 @@ export function AnalysisDetail({ detail, workflowResponse, busy, retrying, onBac
   const [returnTargetTaskId, setReturnTargetTaskId] = useState<string | null>(null)
   const [returnFeedback, setReturnFeedback] = useState('')
   const [detailsOpen, setDetailsOpen] = useState(false)
+
+  if (preview) return <ArtifactPreviewPanel preview={preview} onClosePreview={onClosePreview} />
 
   const currentVersion = detail.artifact
     ? detail.versions.find((version) => version.artifactVersionId === detail.artifact!.currentVersionId) ?? detail.versions[0]
@@ -68,6 +120,9 @@ export function AnalysisDetail({ detail, workflowResponse, busy, retrying, onBac
             <p><strong>Następny etap:</strong> {nextStage ? STAGE_LABELS[nextStage] : 'Zakończenie analizy'}</p>
           </>
           : <p className="success-message">Analiza zakończona.</p>}
+        {workflowResponse.analysisTotalCostUsd !== null && workflowResponse.analysisTotalCostUsd !== undefined && <p className="total-cost">
+          <strong>Łączny koszt analizy:</strong> {formatUsd(workflowResponse.analysisTotalCostUsd)} {workflowResponse.costCurrency ?? 'USD'}
+        </p>}
       </div>
     </div>}
 
@@ -126,14 +181,18 @@ export function AnalysisDetail({ detail, workflowResponse, busy, retrying, onBac
       <h3>Historia</h3>
       <ul className="history-list">{workflowResponse.chain.filter((stage) => stage.activeTask || stage.historicalTasks.length > 0).map((stage) => {
         const total = stage.historicalTasks.length + (stage.activeTask ? 1 : 0)
+        const activeLabel = total > 1 ? `v${total} — ${stage.state === 'COMPLETED' ? 'zatwierdzona' : 'aktualna'}`
+          : stage.state === 'COMPLETED' ? 'Zatwierdzona' : 'Oczekuje na decyzję'
         return <li key={stage.taskType}>
-          <strong>{STAGE_LABELS[stage.taskType]}</strong>
-          {total <= 1
-            ? <span> — {stage.state === 'COMPLETED' ? 'Zatwierdzona' : stage.state === 'CURRENT' ? 'Oczekuje na decyzję' : 'Nie rozpoczęto'}</span>
-            : <ul className="history-versions">
-              {stage.historicalTasks.map((task, index) => <li key={task.taskId}>v{index + 1} — zastąpiona</li>)}
-              {stage.activeTask && <li>v{total} — {stage.state === 'COMPLETED' ? 'zatwierdzona' : 'aktualna'}</li>}
-            </ul>}
+          <div className="history-stage-head">
+            <strong>{STAGE_LABELS[stage.taskType]}</strong>
+            {stage.stageCostUsd !== null && stage.stageCostUsd !== undefined
+              && <span className="history-entry-cost">Razem etap: {formatUsd(stage.stageCostUsd)}</span>}
+          </div>
+          <ul className="history-versions">
+            {stage.historicalTasks.map((task, index) => <HistoryEntry key={task.taskId} task={task} versionLabel={`v${index + 1} — zastąpiona`} onPreview={onPreview} />)}
+            {stage.activeTask && <HistoryEntry key={stage.activeTask.taskId} task={stage.activeTask} versionLabel={activeLabel} onPreview={onPreview} />}
+          </ul>
         </li>
       })}</ul>
     </div>}
