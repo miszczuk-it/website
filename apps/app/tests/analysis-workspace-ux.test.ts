@@ -19,7 +19,7 @@ const RAW_GUID_PATTERN = /00000000-0000-4000-8000-000000000002/
 function noop(): never { throw new Error('not called in this test') }
 
 test('AnalysisList shows "Moje analizy" first, with the create form hidden until "+ Nowa analiza"', () => {
-  const html = renderToStaticMarkup(createElement(AnalysisList, { sessions: [], busy: false, onOpen: noop, onCreate: async () => undefined }))
+  const html = renderToStaticMarkup(createElement(AnalysisList, { sessions: [], busy: false, onOpen: noop, onCreate: async () => undefined, canDelete: false, onDelete: async () => undefined}))
   assert.ok(html.includes('Moje analizy'))
   assert.ok(html.includes('+ Nowa analiza'))
   assert.ok(html.includes('Brak analiz'))
@@ -29,7 +29,7 @@ test('AnalysisList shows "Moje analizy" first, with the create form hidden until
 
 test('AnalysisList renders projectName instead of the raw sessionId GUID', () => {
   const session: SessionListItem = { contractVersion: '1.0', sessionId: SESSION_ID, projectId: 'prj-1', ownerId: 'dev-owner', status: 'ACTIVE', revision: 1, createdAt: '2026-08-28T09:00:00Z', projectName: 'Integracja ERP', currentTaskType: 'PROJECT_PLANNING', updatedAt: '2026-08-28T10:00:00Z' }
-  const html = renderToStaticMarkup(createElement(AnalysisList, { sessions: [session], busy: false, onOpen: noop, onCreate: async () => undefined }))
+  const html = renderToStaticMarkup(createElement(AnalysisList, { sessions: [session], busy: false, onOpen: noop, onCreate: async () => undefined, canDelete: false, onDelete: async () => undefined}))
   assert.ok(html.includes('Integracja ERP'))
   assert.ok(html.includes('Plan projektu'), 'currentTaskType is shown as a Polish stage label, not the raw taskType')
   assert.equal(RAW_GUID_PATTERN.test(html), false, 'the raw sessionId GUID must never appear as visible list text')
@@ -37,7 +37,7 @@ test('AnalysisList renders projectName instead of the raw sessionId GUID', () =>
 
 test('AnalysisList shows "Analiza bez nazwy" and "Nie rozpoczęto" when GAP-014 metadata is absent (older/degraded response)', () => {
   const session: SessionListItem = { contractVersion: '1.0', sessionId: SESSION_ID, projectId: 'prj-1', ownerId: 'dev-owner', status: 'CREATED', revision: 0, createdAt: '2026-08-28T09:00:00Z' }
-  const html = renderToStaticMarkup(createElement(AnalysisList, { sessions: [session], busy: false, onOpen: noop, onCreate: async () => undefined }))
+  const html = renderToStaticMarkup(createElement(AnalysisList, { sessions: [session], busy: false, onOpen: noop, onCreate: async () => undefined, canDelete: false, onDelete: async () => undefined}))
   assert.ok(html.includes('Analiza bez nazwy'))
   assert.ok(html.includes('Nie rozpoczęto'))
 })
@@ -95,7 +95,7 @@ for (const [label, taskType, index] of [['BA', 'BUSINESS_ANALYSIS', 0], ['PM', '
     const workflow = workflowFor(taskType, index)
     const html = renderToStaticMarkup(createElement(AnalysisDetail, {
       detail: detailFor(baseArtifact()), workflowResponse: workflow, busy: false, retrying: false,
-      onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
+      onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
     }))
     const expectedLabel = { BUSINESS_ANALYSIS: 'Analiza biznesowa', PROJECT_PLANNING: 'Plan projektu', CODE_IMPLEMENTATION: 'Implementacja', QUALITY_REVIEW: 'Kontrola jakości' }[taskType]
     assert.ok(html.includes(`Aktualny etap:</strong> ${index + 1} z 4 — ${expectedLabel}`))
@@ -108,7 +108,7 @@ test('AnalysisDetail shows "Analiza zakończona" and no current-specialist panel
   const workflow = workflowFor(null, 4)
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact({ status: 'APPROVED' }), baseSession({ status: 'COMPLETED' })), workflowResponse: workflow, busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
   }))
   assert.ok(html.includes('Analiza zakończona'))
   assert.equal(html.includes('Aktualny specjalista'), false)
@@ -117,7 +117,7 @@ test('AnalysisDetail shows "Analiza zakończona" and no current-specialist panel
 test('AnalysisDetail offers "Poproś o poprawę" only for a READY_FOR_REVIEW result, with the submit button disabled until feedback is typed', () => {
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact({ status: 'READY_FOR_REVIEW' })), workflowResponse: workflowFor('CODE_IMPLEMENTATION', 2), busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
   }))
   assert.ok(html.includes('Poproś o poprawę'))
   assert.ok(html.includes('Zatwierdź'))
@@ -126,13 +126,13 @@ test('AnalysisDetail offers "Poproś o poprawę" only for a READY_FOR_REVIEW res
 test('AnalysisDetail offers "Wróć do wcześniejszego etapu" only when at least one earlier stage is COMPLETED', () => {
   const withEarlierStages = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact({ status: 'READY_FOR_REVIEW' })), workflowResponse: workflowFor('CODE_IMPLEMENTATION', 2), busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
   }))
   assert.ok(withEarlierStages.includes('Wróć do wcześniejszego etapu'))
 
   const withoutEarlierStages = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact({ status: 'READY_FOR_REVIEW' })), workflowResponse: workflowFor('BUSINESS_ANALYSIS', 0), busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
   }))
   assert.equal(withoutEarlierStages.includes('Wróć do wcześniejszego etapu'), false, 'BA is the first stage -- there is nothing earlier to return to')
 })
@@ -147,7 +147,7 @@ test('AnalysisDetail history section shows a superseded version label once a sta
   }
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact()), workflowResponse: workflow, busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
   }))
   assert.ok(html.includes('v1 — zastąpiona'))
   assert.ok(html.includes('v2 — zatwierdzona'))
@@ -156,7 +156,7 @@ test('AnalysisDetail history section shows a superseded version label once a sta
 test('AnalysisDetail never shows raw sessionId/executionId/artifactId outside the collapsed technical-details section', () => {
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact()), workflowResponse: workflowFor('CODE_IMPLEMENTATION', 2), busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
   }))
   assert.ok(html.includes('Szczegóły techniczne'), 'technical details toggle must exist, collapsed by default')
   assert.equal(RAW_GUID_PATTERN.test(html), false, 'raw sessionId must not leak into the always-visible markup (collapsed section is not rendered until toggled)')

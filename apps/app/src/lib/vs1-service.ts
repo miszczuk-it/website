@@ -18,6 +18,10 @@ export interface Vs1Service {
   devLogin(role: EffectiveRole): Promise<AuthMeResponse>
   logout(): Promise<void>
   listSessions(): Promise<SessionListItem[]>
+  // Owner UX Follow-up (GAP-017): soft-delete/archive "Moje analizy" -- the
+  // archived analysis simply stops appearing in listSessions() afterwards;
+  // history/audit/cost is untouched server-side.
+  archiveSession(sessionId: string, expectedRevision: number): Promise<void>
   createSession(input: { projectName: string; goal: string }): Promise<Vs1Detail>
   getDetail(sessionId: string): Promise<Vs1Detail>
   answer(executionId: string, expectedRevision: number | null, questionId: string, answer: string): Promise<Vs1Detail>
@@ -48,13 +52,18 @@ export interface Vs1Service {
   // "Wróć do wcześniejszego etapu": return to an earlier, already-approved
   // stage identified by targetTaskId (from a SessionWorkflowStage.activeTask).
   returnToStage(sessionId: string, targetTaskId: string, feedback: string, expectedRevision: number): Promise<Vs1Detail>
+  // Owner UX Follow-up (GAP-017, Feature 4): read-only fetch of any Task's
+  // own Artifact + versions, for the "Podgląd" historical-result view. Never
+  // mutates anything -- reuses the same GET endpoints the current-stage view
+  // already relies on.
+  getArtifactPreview(artifactId: string): Promise<{ artifact: ArtifactResponse; versions: ArtifactVersionResponse[] }>
 }
 
-const owner: AuthMeResponse = { contractVersion: '1.0', userId: 'usr_owner_demo', displayName: 'Anna Kowalska', effectiveRole: 'OWNER', permissions: ['session.view', 'session.create', 'session.answer_question', 'session.comment', 'session.feedback', 'session.approve', 'session.request_revision', 'session.cancel_own'] }
+const owner: AuthMeResponse = { contractVersion: '1.0', userId: 'usr_owner_demo', displayName: 'Anna Kowalska', effectiveRole: 'OWNER', permissions: ['session.view', 'session.create', 'session.answer_question', 'session.comment', 'session.feedback', 'session.approve', 'session.request_revision', 'session.cancel_own', 'session.archive_own'] }
 const roles: Record<EffectiveRole, AuthMeResponse> = {
   OWNER: owner,
   OBSERVER: { ...owner, userId: 'usr_observer_demo', displayName: 'Jan Nowak', effectiveRole: 'OBSERVER', permissions: ['session.view'] },
-  ADMIN: { ...owner, userId: 'usr_admin_demo', displayName: 'Administrator', effectiveRole: 'ADMIN', permissions: ['session.view'] },
+  ADMIN: { ...owner, userId: 'usr_admin_demo', displayName: 'Administrator', effectiveRole: 'ADMIN', permissions: ['session.view', 'session.archive_any'] },
 }
 
 function error(code: string): never { throw new PlatformApiError(code, 'corr-vs1-demo') }
@@ -68,6 +77,14 @@ export function createMockVs1Service(): Vs1Service {
     async devLogin(role) { current = roles[role]; return current },
     async logout() { current = null },
     async listSessions() { if (!current) error('UNAUTHENTICATED'); return [...details.values()].map(({ session }) => session) },
+    async archiveSession(sessionId, expectedRevision) {
+      if (!current) error('UNAUTHENTICATED')
+      const detail = details.get(sessionId)
+      if (!detail) error('NOT_FOUND')
+      if (!current.permissions.includes('session.archive_own') && !current.permissions.includes('session.archive_any')) error('NOT_AUTHORIZED')
+      if (detail.session.revision !== expectedRevision) error('CONFLICT')
+      details.delete(sessionId)
+    },
     async createSession(input) {
       if (!current || !current.permissions.includes('session.create')) error('NOT_AUTHORIZED')
       if (!input.projectName.trim() || !input.goal.trim()) error('VALIDATION_ERROR')
@@ -128,6 +145,15 @@ export function createMockVs1Service(): Vs1Service {
       detail.artifact = { contractVersion: '1.0', artifactId, projectId: detail.session.projectId, sessionId: detail.session.sessionId, taskId: `task_${detail.session.sessionId.slice(4)}`, executionId, artifactType: 'ANALYSIS', title: 'Wynik analizy', status: 'READY_FOR_REVIEW', currentVersionId: versionId, revision: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
       detail.versions = [{ contractVersion: '1.0', artifactVersionId: versionId, artifactId, versionNumber: 1, sourceAttemptId: null, contentText: 'Wynik po ponowieniu.', contentSchemaVersion: '1.0', checksum: 'mock', createdByType: 'SYSTEM', createdByReference: 'mock-vs1-retry', createdAt: new Date().toISOString() }]
       return refresh(detail)
+    },
+    // The mock only ever models a single BUSINESS_ANALYSIS stage, so the
+    // only Artifact ever previewable is the current one -- searched across
+    // every tracked analysis (mirrors the real backend's own artifactId
+    // lookup being independent of which analysis is currently open).
+    async getArtifactPreview(artifactId) {
+      const match = [...details.values()].find(({ artifact }) => artifact?.artifactId === artifactId)
+      if (!match?.artifact) error('NOT_FOUND')
+      return { artifact: match.artifact, versions: match.versions }
     },
     // The mock only ever models a single BUSINESS_ANALYSIS stage (see the
     // note on advanceToNextSpecialist above) -- its workflow projection
@@ -255,6 +281,7 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
     devLogin: (role) => client.devLogin(role, correlationId()),
     logout: () => client.logout(correlationId()),
     listSessions: () => client.listSessionsOwnedByMe(correlationId()),
+    archiveSession: async (sessionId, expectedRevision) => { await client.archiveSession(sessionId, expectedRevision, correlationId()) },
 
     async createSession(input) {
       const cid = correlationId()
@@ -352,6 +379,13 @@ export function createRealVs1Service(baseUrl: string): Vs1Service {
     },
 
     getWorkflow: (sessionId) => client.getSessionWorkflow(sessionId, correlationId()),
+
+    async getArtifactPreview(artifactId) {
+      const cid = correlationId()
+      const artifact = await client.getArtifact(artifactId, cid)
+      const versions = await client.listArtifactVersions(artifactId, cid)
+      return { artifact, versions }
+    },
 
     // Two-step backend contract, matching AnalysisWorkspace.tsx's
     // decideOnArtifact/beginRevisionPolling: REQUEST_REVISION decision

@@ -19,6 +19,8 @@ export type PlatformApiClient = {
   createProject(name: string, description: string, correlationId: string): Promise<ProjectResponse>
   createSession(projectId: string, correlationId: string): Promise<SessionResponse>
   startSession(sessionId: string, expectedRevision: number, correlationId: string): Promise<SessionResponse>
+  // Owner UX Follow-up (GAP-017): soft-delete/archive "Moje analizy".
+  archiveSession(sessionId: string, expectedRevision: number, correlationId: string): Promise<SessionResponse>
   createTask(sessionId: string, title: string, description: string, correlationId: string): Promise<TaskResponse>
   markTaskReady(taskId: string, expectedRevision: number, correlationId: string): Promise<TaskResponse>
   startExecution(taskId: string, expectedTaskRevision: number, idempotencyKey: string, correlationId: string): Promise<ExecutionResponse>
@@ -203,6 +205,7 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
     createProject: (name, description, correlationId) => call('POST', '/projects', { contractVersion: '1.0', name, description }, correlationId, 'project'),
     createSession: (projectId, correlationId) => call('POST', `/projects/${projectId}/sessions`, { contractVersion: '1.0' }, correlationId, 'session'),
     startSession: (sessionId, expectedRevision, correlationId) => call('POST', `/sessions/${sessionId}/start`, { contractVersion: '1.0', expectedRevision }, correlationId, 'session'),
+    archiveSession: (sessionId, expectedRevision, correlationId) => call('POST', `/sessions/${sessionId}/archive`, { contractVersion: '1.0', expectedRevision }, correlationId, 'session'),
     createTask: (sessionId, title, description, correlationId) => call('POST', `/sessions/${sessionId}/tasks`, { contractVersion: '1.0', taskType: 'BUSINESS_ANALYSIS', title, description }, correlationId, 'task'),
     markTaskReady: (taskId, expectedRevision, correlationId) => call('POST', `/tasks/${taskId}/ready`, { contractVersion: '1.0', expectedRevision }, correlationId, 'task'),
     startExecution: (taskId, expectedTaskRevision, idempotencyKey, correlationId) => call('POST', `/tasks/${taskId}/executions`, {

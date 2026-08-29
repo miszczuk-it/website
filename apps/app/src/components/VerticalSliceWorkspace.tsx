@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AuthMeResponse, ExecutionStatusResponse, SessionWorkflowResponse } from '../types.js'
+import type { ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, ExecutionStatusResponse, SessionListItem, SessionWorkflowResponse } from '../types.js'
 import { runGuarded, type SingleFlightGuard } from '../lib/execution-flow.js'
 import { PlatformApiError, toSafeUiError } from '../lib/safe-error.js'
 import { createMockVs1Service, createRealVs1Service, type Vs1Detail, type Vs1Service } from '../lib/vs1-service.js'
@@ -38,6 +38,7 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
   const [sessions, setSessions] = useState<Vs1Detail['session'][]>([])
   const [detail, setDetail] = useState<Vs1Detail | null>(null)
   const [workflow, setWorkflow] = useState<SessionWorkflowResponse | null>(null)
+  const [preview, setPreview] = useState<{ artifact: ArtifactResponse; versions: ArtifactVersionResponse[] } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   // Every action below can trigger a real, billed LLM Gateway call and takes
   // seconds to round-trip; without this guard a user unsure whether their
@@ -64,10 +65,32 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
 
   const openAnalysis = async (sessionId: string) => {
     setNotice(null)
+    setPreview(null)
     try {
       const [nextDetail] = await Promise.all([service.getDetail(sessionId), loadWorkflow(sessionId)])
       setDetail(nextDetail)
     } catch (error) { report(error) }
+  }
+
+  // Owner UX Follow-up (GAP-017): "Usuń analizę" -- soft-delete/archive.
+  // Mirrors the shape of run()/retry() (clear stale notice, report safely
+  // on failure) but skips the shared `busy` guard: archiving is a cheap,
+  // unbilled action, and AnalysisList already disables its own confirm
+  // button for the duration of the call.
+  const deleteAnalysis = async (session: SessionListItem) => {
+    setNotice(null)
+    try {
+      await service.archiveSession(session.sessionId, session.revision)
+      await load()
+    } catch (error) { report(error) }
+  }
+
+  // Owner UX Follow-up (GAP-017, Feature 4): read-only "Podgląd" of a
+  // historical/completed Task's Artifact -- never touches `detail`/
+  // `workflow`, so returning to the current stage needs no re-fetch.
+  const openPreview = async (artifactId: string) => {
+    setNotice(null)
+    try { setPreview(await service.getArtifactPreview(artifactId)) } catch (error) { report(error) }
   }
 
   const run = async (action: () => Promise<Vs1Detail>) => {
@@ -120,8 +143,10 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
     {!detail && <AnalysisList
       sessions={sessions}
       busy={busy}
+      canDelete={user.permissions.includes('session.archive_own') || user.permissions.includes('session.archive_any')}
       onOpen={openAnalysis}
       onCreate={async (input) => { await run(() => service.createSession(input)) }}
+      onDelete={deleteAnalysis}
     />}
 
     {detail && <AnalysisDetail
@@ -129,13 +154,16 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
       workflowResponse={workflow}
       busy={busy}
       retrying={retrying}
-      onBack={() => { setDetail(null); setWorkflow(null); void load() }}
+      onBack={() => { setDetail(null); setWorkflow(null); setPreview(null); void load() }}
       onAnswer={(answer) => run(() => service.answer(detail.execution.executionId, detail.executionRevision, detail.execution.pendingQuestion!.questionId, answer))}
       onApprove={() => run(() => service.approve(detail.artifact!, detail.versions.find((version) => version.artifactVersionId === detail.artifact!.currentVersionId) ?? detail.versions[0]!))}
       onRequestRevision={(feedback) => run(() => service.requestRevision(detail.artifact!, detail.versions.find((version) => version.artifactVersionId === detail.artifact!.currentVersionId) ?? detail.versions[0]!, feedback))}
       onAdvance={() => run(() => service.advanceToNextSpecialist(detail.artifact!.artifactId))}
       onRetry={() => retry(detail)}
       onReturnToStage={(targetTaskId, feedback) => run(() => service.returnToStage(detail.session.sessionId, targetTaskId, feedback, detail.session.revision))}
+      preview={preview}
+      onPreview={openPreview}
+      onClosePreview={() => setPreview(null)}
     />}
   </main>
 }
