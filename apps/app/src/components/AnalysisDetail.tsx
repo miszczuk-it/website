@@ -2,8 +2,35 @@ import { useState } from 'react'
 import type { AnalysisContextEntry, AnalysisContextResponse, ArtifactResponse, ArtifactVersionResponse, ContextSection, ContextVersionSummary, SessionWorkflowStage, TaskResponse } from '../types.js'
 import type { Vs1Detail } from '../lib/vs1-service.js'
 import { formatUsd, REVISION_KIND_LABELS, revisionKindOf, SESSION_STATUS_LABELS, SPECIALIST_LABELS, STAGE_LABELS, STAGE_ORDER, STAGE_STATE_ICON } from '../lib/workflow-labels.js'
+import { artifactContent, artifactExportName, artifactMarkdown, downloadText } from '../lib/artifact-export.js'
+import { EXECUTION_POLLING_STATUSES } from '../lib/execution-flow.js'
 import { ExecutionRetryStatus } from './VerticalSliceWorkspace.js'
 import { SharedContextPanel } from './SharedContextPanel.js'
+
+// BUG-2 fix (PROD UX hotfix, 2026-08-30): Kopiuj/Pobierz already existed in
+// ArtifactReviewPanel.tsx, but that component is only reachable from
+// AnalysisWorkspace.tsx -- which App.tsx never mounts (VerticalSliceWorkspace
+// is the real, live component tree). Reuses the exact same
+// lib/artifact-export.ts helpers ArtifactReviewPanel already relies on, for
+// both the current result and the read-only historical preview below,
+// rather than re-implementing export/copy a third time.
+function ArtifactExportActions({ artifact, version }: { artifact: ArtifactResponse; version: ArtifactVersionResponse }) {
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(artifactContent(version))
+      setCopyNotice('Skopiowano')
+    } catch {
+      setCopyNotice('Nie udało się skopiować wyniku.')
+    }
+  }
+  return <div className="artifact-export-actions">
+    <button type="button" onClick={() => void copy()}>Kopiuj</button>
+    <button type="button" onClick={() => downloadText(artifactMarkdown(artifact, version), artifactExportName(artifact, version, 'md'), 'text/markdown')}>Pobierz .md</button>
+    <button type="button" onClick={() => downloadText(artifactContent(version), artifactExportName(artifact, version, 'txt'), 'text/plain')}>Pobierz .txt</button>
+    {copyNotice && <p role="status" className={copyNotice === 'Skopiowano' ? 'success-message' : undefined}>{copyNotice}</p>}
+  </div>
+}
 
 // §25 of the VS1 UX redesign task: the open-analysis layout is
 // back-link -> name -> progress -> current specialist/next specialist ->
@@ -74,6 +101,7 @@ function ArtifactPreviewPanel({ preview, onClosePreview }: { preview: ArtifactPr
     <h2>{artifact.title}</h2>
     <p className="preview-status"><span className="status">{ARTIFACT_STATUS_LABELS[artifact.status]}</span></p>
     <div className="artifact-version-content"><pre>{version?.contentText ?? (version?.contentJson ? JSON.stringify(version.contentJson, null, 2) : 'Brak treści')}</pre></div>
+    {version && <ArtifactExportActions artifact={artifact} version={version} />}
     <p className="notice-inline">To jest wyłącznie podgląd — bez możliwości edycji ani decyzji.</p>
   </section>
 }
@@ -152,9 +180,14 @@ export function AnalysisDetail({
 
     <ExecutionRetryStatus execution={detail.execution} retrying={retrying} onRetry={onRetry} />
 
+    {!detail.artifact && !detail.execution.pendingQuestion && EXECUTION_POLLING_STATUSES.has(detail.execution.status) && (
+      <p className="processing-indicator" role="status" aria-live="polite">Agent pracuje… Wynik pojawi się tutaj automatycznie po zakończeniu.</p>
+    )}
+
     {detail.artifact && <div className="panel-section">
       <h3>Aktualny wynik{currentStage ? ` — ${STAGE_LABELS[currentStage]}` : ''}</h3>
       <div className="artifact-version-content"><pre>{currentVersion?.contentText ?? 'Brak treści'}</pre></div>
+      {currentVersion && <ArtifactExportActions artifact={detail.artifact} version={currentVersion} />}
 
       <div className="artifact-actions">
         {detail.artifact.status === 'READY_FOR_REVIEW' && <>
