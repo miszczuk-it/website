@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import type { ArtifactResponse, ArtifactVersionResponse, SessionWorkflowStage, TaskResponse } from '../types.js'
+import type { AnalysisContextEntry, AnalysisContextResponse, ArtifactResponse, ArtifactVersionResponse, ContextSection, ContextVersionSummary, SessionWorkflowStage, TaskResponse } from '../types.js'
 import type { Vs1Detail } from '../lib/vs1-service.js'
 import { formatUsd, REVISION_KIND_LABELS, revisionKindOf, SESSION_STATUS_LABELS, SPECIALIST_LABELS, STAGE_LABELS, STAGE_ORDER, STAGE_STATE_ICON } from '../lib/workflow-labels.js'
 import { ExecutionRetryStatus } from './VerticalSliceWorkspace.js'
+import { SharedContextPanel } from './SharedContextPanel.js'
 
 // §25 of the VS1 UX redesign task: the open-analysis layout is
 // back-link -> name -> progress -> current specialist/next specialist ->
@@ -28,6 +29,19 @@ type Props = {
   preview: ArtifactPreview | null
   onPreview: (artifactId: string) => void
   onClosePreview: () => void
+  // ADR-009 / GAP-018 completion: Shared Analysis Context, null when the
+  // Platform API isn't available (mock/demo mode -- same precedent as
+  // Settings -> Specjaliści, which has no equivalent there either).
+  sharedContext: AnalysisContextResponse | null
+  contextVersions: ContextVersionSummary[] | null
+  canMutateContext: boolean
+  contextBusy: boolean
+  contextError: string | null
+  contextNotice: string | null
+  onAddContextEntry: (section: ContextSection, content: string) => Promise<void>
+  onEditContextEntry: (entry: AnalysisContextEntry, newContent: string) => Promise<void>
+  onApproveContextEntry: (entryId: string) => Promise<void>
+  onRejectContextEntry: (entryId: string) => Promise<void>
 }
 
 function StageRow({ stage }: { stage: SessionWorkflowStage }) {
@@ -82,7 +96,10 @@ function HistoryEntry({ task, versionLabel, onPreview }: { task: TaskResponse; v
   </li>
 }
 
-export function AnalysisDetail({ detail, workflowResponse, busy, retrying, onBack, onAnswer, onApprove, onRequestRevision, onAdvance, onRetry, onReturnToStage, preview, onPreview, onClosePreview }: Props) {
+export function AnalysisDetail({
+  detail, workflowResponse, busy, retrying, onBack, onAnswer, onApprove, onRequestRevision, onAdvance, onRetry, onReturnToStage, preview, onPreview, onClosePreview,
+  sharedContext, contextVersions, canMutateContext, contextBusy, contextError, contextNotice, onAddContextEntry, onEditContextEntry, onApproveContextEntry, onRejectContextEntry,
+}: Props) {
   const [answer, setAnswer] = useState('Wyłącznie odczyt danych.')
   const [revisionFeedback, setRevisionFeedback] = useState('')
   const [revisionFormOpen, setRevisionFormOpen] = useState(false)
@@ -196,6 +213,19 @@ export function AnalysisDetail({ detail, workflowResponse, busy, retrying, onBac
         </li>
       })}</ul>
     </div>}
+
+    <SharedContextPanel
+      context={sharedContext}
+      versions={contextVersions}
+      canMutate={canMutateContext}
+      busy={contextBusy}
+      error={contextError}
+      notice={contextNotice}
+      onAdd={onAddContextEntry}
+      onEdit={onEditContextEntry}
+      onApprove={onApproveContextEntry}
+      onReject={onRejectContextEntry}
+    />
 
     <div className="panel-section">
       <button type="button" className="details-toggle" onClick={() => setDetailsOpen((open) => !open)}>

@@ -49,7 +49,7 @@ function render(workflow: SessionWorkflowResponse, artifact: ArtifactResponse | 
   return renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(artifact), workflowResponse: workflow, busy: false, retrying: false,
     onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
-    preview: null, onPreview: noop, onClosePreview: noop,
+    preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
 }
 

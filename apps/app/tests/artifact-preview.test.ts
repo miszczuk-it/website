@@ -53,7 +53,7 @@ test('history offers a "Podgląd" button for every entry that has an artifactId'
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(), workflowResponse: workflowWithHistory(), busy: false, retrying: false,
     onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
-    preview: null, onPreview: noop, onClosePreview: noop,
+    preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.equal((html.match(/Podgląd/g) ?? []).length, 2, 'both the historical v1 and the current v2 entry offer Podgląd')
 })
@@ -64,7 +64,7 @@ test('history omits "Podgląd" for an entry with no artifactId (never produced a
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(), workflowResponse: workflow, busy: false, retrying: false,
     onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
-    preview: null, onPreview: noop, onClosePreview: noop,
+    preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.equal((html.match(/Podgląd/g) ?? []).length, 1, 'only the current entry (with an artifactId) offers Podgląd')
 })
@@ -74,7 +74,7 @@ test('the preview view shows historical content and status, with no mutation act
     detail: detailFor(), workflowResponse: workflowWithHistory(), busy: false, retrying: false,
     onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
     preview: { artifact: baseArtifact({ status: 'APPROVED', title: 'Plan projektu — wersja 1' }), versions: [baseVersion({ contentText: 'Treść zatwierdzonej wersji 1.' })] },
-    onPreview: noop, onClosePreview: noop,
+    onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.ok(html.includes('Treść zatwierdzonej wersji 1.'))
   assert.ok(html.includes('Zatwierdzona'), 'artifact status label shown')
@@ -89,7 +89,7 @@ test('the normal (non-preview) view keeps its full actionable content', () => {
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(), workflowResponse: workflowWithHistory(), busy: false, retrying: false,
     onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop,
-    preview: null, onPreview: noop, onClosePreview: noop,
+    preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.ok(html.includes('Aktualny wynik'))
   assert.ok(html.includes('Zatwierdź'))

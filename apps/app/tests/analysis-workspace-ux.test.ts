@@ -95,7 +95,7 @@ for (const [label, taskType, index] of [['BA', 'BUSINESS_ANALYSIS', 0], ['PM', '
     const workflow = workflowFor(taskType, index)
     const html = renderToStaticMarkup(createElement(AnalysisDetail, {
       detail: detailFor(baseArtifact()), workflowResponse: workflow, busy: false, retrying: false,
-      onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
+      onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
     }))
     const expectedLabel = { BUSINESS_ANALYSIS: 'Analiza biznesowa', PROJECT_PLANNING: 'Plan projektu', CODE_IMPLEMENTATION: 'Implementacja', QUALITY_REVIEW: 'Kontrola jakości' }[taskType]
     assert.ok(html.includes(`Aktualny etap:</strong> ${index + 1} z 4 — ${expectedLabel}`))
@@ -108,7 +108,7 @@ test('AnalysisDetail shows "Analiza zakończona" and no current-specialist panel
   const workflow = workflowFor(null, 4)
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact({ status: 'APPROVED' }), baseSession({ status: 'COMPLETED' })), workflowResponse: workflow, busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.ok(html.includes('Analiza zakończona'))
   assert.equal(html.includes('Aktualny specjalista'), false)
@@ -117,7 +117,7 @@ test('AnalysisDetail shows "Analiza zakończona" and no current-specialist panel
 test('AnalysisDetail offers "Poproś o poprawę" only for a READY_FOR_REVIEW result, with the submit button disabled until feedback is typed', () => {
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact({ status: 'READY_FOR_REVIEW' })), workflowResponse: workflowFor('CODE_IMPLEMENTATION', 2), busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.ok(html.includes('Poproś o poprawę'))
   assert.ok(html.includes('Zatwierdź'))
@@ -126,13 +126,13 @@ test('AnalysisDetail offers "Poproś o poprawę" only for a READY_FOR_REVIEW res
 test('AnalysisDetail offers "Wróć do wcześniejszego etapu" only when at least one earlier stage is COMPLETED', () => {
   const withEarlierStages = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact({ status: 'READY_FOR_REVIEW' })), workflowResponse: workflowFor('CODE_IMPLEMENTATION', 2), busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.ok(withEarlierStages.includes('Wróć do wcześniejszego etapu'))
 
   const withoutEarlierStages = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact({ status: 'READY_FOR_REVIEW' })), workflowResponse: workflowFor('BUSINESS_ANALYSIS', 0), busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.equal(withoutEarlierStages.includes('Wróć do wcześniejszego etapu'), false, 'BA is the first stage -- there is nothing earlier to return to')
 })
@@ -147,7 +147,7 @@ test('AnalysisDetail history section shows a superseded version label once a sta
   }
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact()), workflowResponse: workflow, busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.ok(html.includes('v1 — zastąpiona'))
   assert.ok(html.includes('v2 — zatwierdzona'))
@@ -156,7 +156,7 @@ test('AnalysisDetail history section shows a superseded version label once a sta
 test('AnalysisDetail never shows raw sessionId/executionId/artifactId outside the collapsed technical-details section', () => {
   const html = renderToStaticMarkup(createElement(AnalysisDetail, {
     detail: detailFor(baseArtifact()), workflowResponse: workflowFor('CODE_IMPLEMENTATION', 2), busy: false, retrying: false,
-    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop,
+    onBack: noop, onAnswer: noop, onApprove: noop, onRequestRevision: noop, onAdvance: noop, onRetry: noop, onReturnToStage: noop, preview: null, onPreview: noop, onClosePreview: noop, sharedContext: null, contextVersions: null, canMutateContext: false, contextBusy: false, contextError: null, contextNotice: null, onAddContextEntry: noop, onEditContextEntry: noop, onApproveContextEntry: noop, onRejectContextEntry: noop,
   }))
   assert.ok(html.includes('Szczegóły techniczne'), 'technical details toggle must exist, collapsed by default')
   assert.equal(RAW_GUID_PATTERN.test(html), false, 'raw sessionId must not leak into the always-visible markup (collapsed section is not rendered until toggled)')
