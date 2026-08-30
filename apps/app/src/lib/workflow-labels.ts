@@ -1,4 +1,4 @@
-import type { SessionResponse, SpecialistTaskType } from '../types.js'
+import type { ContextSection, SessionResponse, SpecialistTaskType } from '../types.js'
 
 // Central Polish-language glossary for the VS1 workspace (UX redesign task,
 // 2026-08-28): the UI speaks in user terms (Analiza/Etap/Specjalista/Wynik),
@@ -33,6 +33,22 @@ export const STAGE_STATE_ICON: Record<'COMPLETED' | 'CURRENT' | 'UPCOMING', stri
   CURRENT: '●',
   UPCOMING: '○',
 }
+
+// §25: the Owner never sees the technical section enum -- only these
+// Polish category names. CONTEXT_SECTION_ORDER fixes a stable display
+// order (matches the order the backend's own CONTEXT_SECTIONS is declared
+// in), independent of whatever order entries happen to arrive in.
+export const CONTEXT_SECTION_LABELS: Record<ContextSection, string> = {
+  GOAL: 'Cel',
+  SCOPE: 'Zakres',
+  ASSUMPTIONS: 'Założenie',
+  CONSTRAINTS: 'Ograniczenie',
+  OWNER_DECISIONS: 'Decyzja',
+  REQUIREMENTS: 'Wymaganie',
+  OPEN_QUESTIONS: 'Otwarte pytanie',
+  IMPORTANT_NOTES: 'Notatka',
+}
+export const CONTEXT_SECTION_ORDER: ContextSection[] = ['GOAL', 'SCOPE', 'ASSUMPTIONS', 'CONSTRAINTS', 'OWNER_DECISIONS', 'REQUIREMENTS', 'OPEN_QUESTIONS', 'IMPORTANT_NOTES']
 
 // Owner UX Follow-up (GAP-017): server-owned cost, USD only for now (task
 // §16 -- no PLN conversion without a real exchange rate). null/undefined

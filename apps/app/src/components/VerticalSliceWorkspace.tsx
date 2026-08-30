@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, ExecutionStatusResponse, SessionListItem, SessionWorkflowResponse,
+  AnalysisContextEntry, AnalysisContextResponse, ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, ContextSection, ContextVersionSummary, ExecutionStatusResponse, SessionListItem, SessionWorkflowResponse,
   SpecialistProfileResponse, SpecialistProfileVersionCreateInput, SpecialistProfileVersionResponse, SpecialistTaskType,
 } from '../types.js'
 import { runGuarded, type SingleFlightGuard } from '../lib/execution-flow.js'
@@ -57,6 +57,14 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
   const [sessions, setSessions] = useState<Vs1Detail['session'][]>([])
   const [detail, setDetail] = useState<Vs1Detail | null>(null)
   const [workflow, setWorkflow] = useState<SessionWorkflowResponse | null>(null)
+  // ADR-009 / GAP-018 completion: Shared Analysis Context, same
+  // direct-to-Platform-API pattern as Settings -> Specjaliści above (null,
+  // and the panel itself renders nothing, when there is no real backend).
+  const [sharedContext, setSharedContext] = useState<AnalysisContextResponse | null>(null)
+  const [contextVersions, setContextVersions] = useState<ContextVersionSummary[] | null>(null)
+  const [contextBusy, setContextBusy] = useState(false)
+  const [contextError, setContextError] = useState<string | null>(null)
+  const [contextNotice, setContextNotice] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ artifact: ArtifactResponse; versions: ArtifactVersionResponse[] } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   // Every action below can trigger a real, billed LLM Gateway call and takes
@@ -82,14 +90,75 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
     try { setWorkflow(await service.getWorkflow(sessionId)) } catch { setWorkflow(null) }
   }
 
+  // ADR-009 / GAP-018 completion: loads the current Shared Context and its
+  // version-history summary together. Best-effort like loadWorkflow --
+  // absent in mock mode (no platformApi) and never blocks opening the
+  // Analysis itself on failure.
+  const loadSharedContext = async (sessionId: string) => {
+    if (!platformApi) { setSharedContext(null); setContextVersions(null); return }
+    setContextError(null)
+    try {
+      const [context, versions] = await Promise.all([
+        platformApi.getSessionContext(sessionId, crypto.randomUUID()),
+        platformApi.listContextVersions(sessionId, crypto.randomUUID()),
+      ])
+      setSharedContext(context)
+      setContextVersions(versions)
+    } catch { setSharedContext(null); setContextVersions(null) }
+  }
+
   const openAnalysis = async (sessionId: string) => {
     setNotice(null)
     setPreview(null)
+    setContextNotice(null)
     try {
-      const [nextDetail] = await Promise.all([service.getDetail(sessionId), loadWorkflow(sessionId)])
+      const [nextDetail] = await Promise.all([service.getDetail(sessionId), loadWorkflow(sessionId), loadSharedContext(sessionId)])
       setDetail(nextDetail)
     } catch (error) { report(error) }
   }
+
+  // Every Shared Context mutation below follows the same shape: send
+  // `sharedContext.versionNumber` as expectedRevision, replace state with
+  // the full new context the backend returns (which already carries the
+  // bumped versionNumber, so the *next* mutation's expectedRevision is
+  // automatically current), and on a real CONFLICT (context changed
+  // elsewhere in the meantime) resync silently instead of leaving stale
+  // state that would just conflict again.
+  const mutateContext = async (mutate: (sessionId: string, expectedRevision: number) => Promise<AnalysisContextResponse>) => {
+    if (!platformApi || !detail || !sharedContext || contextBusy) return
+    setContextBusy(true)
+    setContextError(null)
+    setContextNotice(null)
+    try {
+      const next = await mutate(detail.session.sessionId, sharedContext.versionNumber)
+      setSharedContext(next)
+      setContextVersions(await platformApi.listContextVersions(detail.session.sessionId, crypto.randomUUID()))
+    } catch (error) {
+      if (error instanceof PlatformApiError && error.code === 'CONFLICT') {
+        setContextNotice('Kontekst zmienił się w międzyczasie. Odświeżono.')
+        await loadSharedContext(detail.session.sessionId)
+      } else {
+        setContextError(toSafeUiError(error).message)
+      }
+    } finally {
+      setContextBusy(false)
+    }
+  }
+  const addContextFinding = (section: ContextSection, content: string) => mutateContext((sessionId, expectedRevision) =>
+    platformApi!.addContextEntry(sessionId, { section, classification: 'OWNER_CONFIRMED', content }, expectedRevision, crypto.randomUUID()))
+  // §7: editing an ACTIVE entry is never an in-place update -- withdraw the
+  // old entry, then add the new content as a fresh OWNER_CONFIRMED entry.
+  // Two Context versions are created (both preserved in history), not one;
+  // the edit is itself an Owner action, so the replacement is always
+  // OWNER_CONFIRMED regardless of the original entry's classification.
+  const editContextFinding = (entry: AnalysisContextEntry, newContent: string) => mutateContext(async (sessionId, expectedRevision) => {
+    const withdrawn = await platformApi!.withdrawContextEntry(sessionId, entry.entryId, expectedRevision, crypto.randomUUID())
+    return platformApi!.addContextEntry(sessionId, { section: entry.section, classification: 'OWNER_CONFIRMED', content: newContent }, withdrawn.versionNumber, crypto.randomUUID())
+  })
+  const approveContextProposal = (entryId: string) => mutateContext((sessionId, expectedRevision) =>
+    platformApi!.approveContextEntry(sessionId, entryId, expectedRevision, crypto.randomUUID()))
+  const rejectContextProposal = (entryId: string) => mutateContext((sessionId, expectedRevision) =>
+    platformApi!.rejectContextEntry(sessionId, entryId, expectedRevision, crypto.randomUUID()))
 
   // Owner UX Follow-up (GAP-017): "Usuń analizę" -- soft-delete/archive.
   // Mirrors the shape of run()/retry() (clear stale notice, report safely
@@ -233,7 +302,7 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
       workflowResponse={workflow}
       busy={busy}
       retrying={retrying}
-      onBack={() => { setDetail(null); setWorkflow(null); setPreview(null); void load() }}
+      onBack={() => { setDetail(null); setWorkflow(null); setPreview(null); setSharedContext(null); setContextVersions(null); void load() }}
       onAnswer={(answer) => run(() => service.answer(detail.execution.executionId, detail.executionRevision, detail.execution.pendingQuestion!.questionId, answer))}
       onApprove={() => run(() => service.approve(detail.artifact!, detail.versions.find((version) => version.artifactVersionId === detail.artifact!.currentVersionId) ?? detail.versions[0]!))}
       onRequestRevision={(feedback) => run(() => service.requestRevision(detail.artifact!, detail.versions.find((version) => version.artifactVersionId === detail.artifact!.currentVersionId) ?? detail.versions[0]!, feedback))}
@@ -243,6 +312,16 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
       preview={preview}
       onPreview={openPreview}
       onClosePreview={() => setPreview(null)}
+      sharedContext={sharedContext}
+      contextVersions={contextVersions}
+      canMutateContext={user.effectiveRole === 'OWNER' || user.effectiveRole === 'ADMIN'}
+      contextBusy={contextBusy}
+      contextError={contextError}
+      contextNotice={contextNotice}
+      onAddContextEntry={addContextFinding}
+      onEditContextEntry={editContextFinding}
+      onApproveContextEntry={approveContextProposal}
+      onRejectContextEntry={rejectContextProposal}
     />}
   </main>
 }

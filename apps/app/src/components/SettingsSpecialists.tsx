@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { SPECIALIST_LABELS, STAGE_ORDER } from '../lib/workflow-labels.js'
+import { draftFromVersions, EMPTY_SPECIALIST_PROFILE_DRAFT } from '../lib/specialist-profile-draft.js'
 import type { SpecialistProfileResponse, SpecialistProfileVersionCreateInput, SpecialistProfileVersionResponse, SpecialistTaskType } from '../types.js'
 import { ConfirmDialog } from './ConfirmDialog.js'
 
@@ -14,7 +15,7 @@ import { ConfirmDialog } from './ConfirmDialog.js'
 // non-OBSERVER identity on the backend; mutation (create draft / activate)
 // is OWNER/ADMIN-only -- canMutate here only decides whether to *offer*
 // those controls, never whether they are allowed.
-const EMPTY_DRAFT = { systemPrompt: '', responsibilities: '', excludedResponsibilities: '', expectedOutputGuidance: '' }
+const EMPTY_DRAFT = EMPTY_SPECIALIST_PROFILE_DRAFT
 
 type Props = {
   profiles: SpecialistProfileResponse[] | null
@@ -84,7 +85,10 @@ export function SettingsSpecialists({
       <div className="specialist-profile-versions">
         <div className="panel-header-row">
           <h3>Historia wersji — {SPECIALIST_LABELS[selectedType]}</h3>
-          {canMutate && <button className="primary" type="button" onClick={() => setFormOpen((open) => !open)}>
+          {canMutate && <button className="primary" type="button" onClick={() => {
+            if (!formOpen) setDraft(draftFromVersions(versions))
+            setFormOpen((open) => !open)
+          }}>
             {formOpen ? 'Anuluj' : '+ Nowy DRAFT'}
           </button>}
         </div>

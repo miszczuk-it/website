@@ -1,5 +1,6 @@
 import type { ArtifactResponse, ArtifactVersionResponse } from '../types.js'
 
+// eslint-disable-next-line no-control-regex -- control characters are invalid in filenames on Windows/most filesystems and must be stripped
 const INVALID_FILE_NAME = /[\\/:*?"<>|\u0000-\u001f]/g
 
 export function sanitizeFileName(value: string, fallback = 'wynik'): string {

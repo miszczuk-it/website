@@ -3,6 +3,7 @@ import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SettingsSpecialists } from '../src/components/SettingsSpecialists.js'
+import { draftFromVersions } from '../src/lib/specialist-profile-draft.js'
 import type { SpecialistProfileResponse, SpecialistProfileVersionResponse } from '../src/types.js'
 
 // ADR-009 (GAP-018 finding 2): Settings -> Specjaliści. Purely presentational
@@ -59,4 +60,17 @@ test('the version history list never renders the system prompt content or the ra
   const html = render(true)
   assert.doesNotMatch(html, /SYSTEM_PROMPT_SECRET_CONTENT/)
   assert.doesNotMatch(html, /technical-id-aaa111|technical-id-bbb222/)
+})
+
+// §22: "+ Nowy DRAFT" must start from the current ACTIVE version's content,
+// never blank -- regression for a bug where the draft form always opened
+// empty regardless of what was already ACTIVE.
+test('draftFromVersions copies the ACTIVE version content, not the DRAFT one', () => {
+  const draft = draftFromVersions(VERSIONS)
+  assert.equal(draft.systemPrompt, 'SYSTEM_PROMPT_SECRET_CONTENT_V1')
+})
+
+test('draftFromVersions falls back to an empty draft when no ACTIVE version exists', () => {
+  const draft = draftFromVersions([{ ...VERSIONS[1]!, status: 'DRAFT' }])
+  assert.equal(draft.systemPrompt, '')
 })

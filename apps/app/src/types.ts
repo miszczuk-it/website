@@ -35,7 +35,34 @@ export type MvpFlowState = {
 export type ProjectResponse = { contractVersion: '1.0'; projectId: string; status: 'ACTIVE' | 'ARCHIVED'; revision: number }
 export type SessionStatus = 'CREATED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'ARCHIVED'
 export type SessionResponse = { contractVersion: '1.0'; sessionId: string; projectId: string; status: SessionStatus; revision: number }
-export type AnalysisContextResponse = { contractVersion: '1.0'; analysisContextVersionId: string; versionNumber: number; entries: Array<{ section: string; classification: string; status: string; content: string }> }
+// ADR-009 / GAP-018: Shared Analysis Context. `section` is the canonical
+// (technical) category enum -- CONTEXT_SECTION_LABELS in workflow-labels.ts
+// maps it to the Polish category the Owner actually sees (Cel/Zakres/...).
+// `classification` is provenance only (who/what proposed the entry), never
+// visibility -- an entry renders in a prompt/export iff `status==='ACTIVE'`,
+// regardless of classification (an approved AGENT_PROPOSED entry keeps that
+// classification forever, per the backend's own isEntryVisible).
+export type ContextSection = 'GOAL' | 'SCOPE' | 'ASSUMPTIONS' | 'CONSTRAINTS' | 'OWNER_DECISIONS' | 'REQUIREMENTS' | 'OPEN_QUESTIONS' | 'IMPORTANT_NOTES'
+export type ContextEntryClassification = 'OWNER_CONFIRMED' | 'AGENT_PROPOSED' | 'DERIVED'
+export type ContextEntryStatus = 'ACTIVE' | 'PENDING' | 'REJECTED' | 'WITHDRAWN'
+export type AnalysisContextEntry = {
+  entryId: string
+  section: ContextSection
+  classification: ContextEntryClassification
+  status: ContextEntryStatus
+  content: string
+  source: string | null
+  createdBy: string
+  createdAt: string
+  approvedBy: string | null
+  approvedAt: string | null
+}
+export type AnalysisContextResponse = {
+  contractVersion: '1.0'; analysisContextVersionId: string; analysisContextId: string
+  versionNumber: number; entries: AnalysisContextEntry[]; createdAt: string; createdBy: string
+}
+export type ContextVersionSummary = { analysisContextVersionId: string; versionNumber: number; createdAt: string; createdBy: string; current: boolean }
+export type ContextEntryCreateInput = { section: ContextSection; classification: 'OWNER_CONFIRMED' | 'DERIVED'; content: string; source?: string }
 
 // ADR-009 (GAP-018): Settings -> Specjaliści. GET /api/specialist-profiles
 // lists one row per fixed specialist type with its currently ACTIVE

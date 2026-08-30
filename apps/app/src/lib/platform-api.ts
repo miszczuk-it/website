@@ -1,7 +1,7 @@
 import { PlatformApiError } from './safe-error.js'
 import type {
   ArtifactDecisionType, ArtifactNewVersionContent, ArtifactResponse, ArtifactReviewDecisionEnvelope, ArtifactReviewDecisionResponse, ArtifactVersionResponse,
-  AnalysisContextResponse, AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionListItem, SessionResponse, SessionWorkflowResponse, TaskResponse,
+  AnalysisContextResponse, AuthMeResponse, ContextEntryCreateInput, ContextVersionSummary, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, ProjectResponse, SessionListItem, SessionResponse, SessionWorkflowResponse, TaskResponse,
   SpecialistProfileResponse, SpecialistProfileVersionCreateInput, SpecialistProfileVersionResponse, SpecialistTaskType,
 } from '../types.js'
 
@@ -42,7 +42,18 @@ export type PlatformApiClient = {
   createArtifactRevision(artifactId: string, feedback: string, idempotencyKey: string, correlationId: string): Promise<{ task: TaskResponse; execution: ExecutionResponse }>
   // GAP-015: server-computed active lineage of the fixed 4-stage chain.
   getSessionWorkflow(sessionId: string, correlationId: string): Promise<SessionWorkflowResponse>
-  getSessionContext?(sessionId: string, correlationId: string): Promise<AnalysisContextResponse>
+  getSessionContext(sessionId: string, correlationId: string): Promise<AnalysisContextResponse>
+  // ADR-009 (GAP-018 completion): Shared Analysis Context write model.
+  // `expectedRevision` is the context's own `versionNumber` (never
+  // Session.revision) -- two independent counters. No idempotencyKey: a
+  // stale-revision retry either lands as CONFLICT (already applied) or
+  // safely re-applies once (never did), so expectedRevision alone is
+  // enough here, unlike Execution start/retry.
+  addContextEntry(sessionId: string, input: ContextEntryCreateInput, expectedRevision: number, correlationId: string): Promise<AnalysisContextResponse>
+  approveContextEntry(sessionId: string, entryId: string, expectedRevision: number, correlationId: string): Promise<AnalysisContextResponse>
+  rejectContextEntry(sessionId: string, entryId: string, expectedRevision: number, correlationId: string): Promise<AnalysisContextResponse>
+  withdrawContextEntry(sessionId: string, entryId: string, expectedRevision: number, correlationId: string): Promise<AnalysisContextResponse>
+  listContextVersions(sessionId: string, correlationId: string): Promise<ContextVersionSummary[]>
   // ADR-009 (GAP-018): Settings -> Specjaliści.
   listSpecialistProfiles(correlationId: string): Promise<SpecialistProfileResponse[]>
   listSpecialistProfileVersions(specialistType: SpecialistTaskType, correlationId: string): Promise<SpecialistProfileVersionResponse[]>
@@ -144,6 +155,22 @@ function assertSpecialistProfileVersion(value: unknown): SpecialistProfileVersio
     throw new PlatformApiError('INVALID_RESPONSE')
   }
   return value as unknown as SpecialistProfileVersionResponse
+}
+
+function assertAnalysisContext(value: unknown): AnalysisContextResponse {
+  if (!isRecord(value) || value.contractVersion !== '1.0' || typeof value.analysisContextVersionId !== 'string'
+    || !Number.isInteger(value.versionNumber) || !Array.isArray(value.entries)) {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as AnalysisContextResponse
+}
+
+function assertContextVersionSummary(value: unknown): ContextVersionSummary {
+  if (!isRecord(value) || typeof value.analysisContextVersionId !== 'string' || !Number.isInteger(value.versionNumber)
+    || typeof value.current !== 'boolean') {
+    throw new PlatformApiError('INVALID_RESPONSE')
+  }
+  return value as unknown as ContextVersionSummary
 }
 
 function assertWorkflow(value: unknown): SessionWorkflowResponse {
@@ -262,10 +289,20 @@ export function createPlatformApiClient(baseUrl: string, options: ClientOptions 
       contractVersion: '1.0', idempotencyKey, feedback,
     }, correlationId, assertTaskExecutionEnvelope),
     getSessionWorkflow: (sessionId, correlationId) => callValidated('GET', `/sessions/${sessionId}/workflow`, null, correlationId, assertWorkflow),
-    getSessionContext: (sessionId, correlationId) => callValidated('GET', `/sessions/${sessionId}/context`, null, correlationId, (value) => {
-      if (!isRecord(value) || value.contractVersion !== '1.0' || !Number.isInteger(value.versionNumber) || !Array.isArray(value.entries)) throw new PlatformApiError('INVALID_RESPONSE')
-      return value as unknown as AnalysisContextResponse
-    }),
+    getSessionContext: (sessionId, correlationId) => callValidated('GET', `/sessions/${sessionId}/context`, null, correlationId, assertAnalysisContext),
+    addContextEntry: (sessionId, input, expectedRevision, correlationId) => callValidated('POST', `/sessions/${sessionId}/context/entries`, {
+      contractVersion: '1.0', expectedRevision, ...input,
+    }, correlationId, assertAnalysisContext),
+    approveContextEntry: (sessionId, entryId, expectedRevision, correlationId) => callValidated('POST', `/sessions/${sessionId}/context/entries/${entryId}/approve`, {
+      contractVersion: '1.0', expectedRevision,
+    }, correlationId, assertAnalysisContext),
+    rejectContextEntry: (sessionId, entryId, expectedRevision, correlationId) => callValidated('POST', `/sessions/${sessionId}/context/entries/${entryId}/reject`, {
+      contractVersion: '1.0', expectedRevision,
+    }, correlationId, assertAnalysisContext),
+    withdrawContextEntry: (sessionId, entryId, expectedRevision, correlationId) => callValidated('POST', `/sessions/${sessionId}/context/entries/${entryId}/withdraw`, {
+      contractVersion: '1.0', expectedRevision,
+    }, correlationId, assertAnalysisContext),
+    listContextVersions: (sessionId, correlationId) => callList(`/sessions/${sessionId}/context/versions`, correlationId, assertContextVersionSummary),
     returnToStageRevision: (sessionId, targetTaskId, feedback, expectedRevision, idempotencyKey, correlationId) => callValidated('POST', `/sessions/${sessionId}/revisions/return-to-stage`, {
       contractVersion: '1.0', targetTaskId, feedback, expectedRevision, idempotencyKey,
     }, correlationId, assertReturnToStageEnvelope),
