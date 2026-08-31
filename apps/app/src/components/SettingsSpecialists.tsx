@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { SPECIALIST_LABELS, STAGE_ORDER } from '../lib/workflow-labels.js'
-import { draftFromVersions, EMPTY_SPECIALIST_PROFILE_DRAFT } from '../lib/specialist-profile-draft.js'
+import { draftFromVersions, EMPTY_SPECIALIST_PROFILE_DRAFT, selectDisplayedVersion } from '../lib/specialist-profile-draft.js'
 import type { SpecialistProfileResponse, SpecialistProfileVersionCreateInput, SpecialistProfileVersionResponse, SpecialistTaskType } from '../types.js'
 import { ConfirmDialog } from './ConfirmDialog.js'
 
@@ -16,6 +16,54 @@ import { ConfirmDialog } from './ConfirmDialog.js'
 // is OWNER/ADMIN-only -- canMutate here only decides whether to *offer*
 // those controls, never whether they are allowed.
 const EMPTY_DRAFT = EMPTY_SPECIALIST_PROFILE_DRAFT
+
+// Specialist Settings UX follow-up: an Owner used to see only the version
+// number/status, never what a version actually contains -- so a new DRAFT
+// was drafted blind. Shared by the default "Aktualna konfiguracja" view
+// (the ACTIVE version) and the per-history-row "Podgląd" (any version) --
+// same fields, just a different version and heading; see
+// selectDisplayedVersion for which one is showing.
+function SpecialistProfileVersionDetail({ version }: { version: SpecialistProfileVersionResponse }) {
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(version.systemPrompt)
+      setCopyNotice('Skopiowano')
+    } catch {
+      setCopyNotice('Nie udało się skopiować instrukcji.')
+    }
+  }
+  return <div className="specialist-profile-detail">
+    <div className="specialist-profile-detail-field">
+      <div className="specialist-profile-detail-field-head">
+        <h4>Instrukcja systemowa</h4>
+        <button type="button" onClick={() => void copyPrompt()}>Kopiuj instrukcję</button>
+      </div>
+      <pre className="system-prompt-viewer">{version.systemPrompt}</pre>
+      {copyNotice && <p role="status" className={copyNotice === 'Skopiowano' ? 'success-message' : undefined}>{copyNotice}</p>}
+    </div>
+    <div className="specialist-profile-detail-field">
+      <h4>Odpowiedzialności</h4>
+      <p className="specialist-profile-detail-text">{version.responsibilities || '—'}</p>
+    </div>
+    <div className="specialist-profile-detail-field">
+      <h4>Poza zakresem</h4>
+      <p className="specialist-profile-detail-text">{version.excludedResponsibilities || '—'}</p>
+    </div>
+    <div className="specialist-profile-detail-field">
+      <h4>Oczekiwany wynik</h4>
+      <p className="specialist-profile-detail-text">{version.expectedOutputGuidance || '—'}</p>
+    </div>
+    <div className="specialist-profile-detail-field">
+      <h4>Profil modelu</h4>
+      <p className="specialist-profile-detail-text">{version.modelProfileKey}</p>
+    </div>
+    <div className="specialist-profile-detail-field">
+      <h4>Limit odpowiedzi</h4>
+      <p className="specialist-profile-detail-text">{version.maxOutputTokensOverride != null ? `${version.maxOutputTokensOverride} tokenów` : '— (domyślny limit modelu)'}</p>
+    </div>
+  </div>
+}
 
 type Props = {
   profiles: SpecialistProfileResponse[] | null
@@ -39,6 +87,7 @@ export function SettingsSpecialists({
   const [formOpen, setFormOpen] = useState(false)
   const [draft, setDraft] = useState(EMPTY_DRAFT)
   const [pendingActivate, setPendingActivate] = useState<SpecialistProfileVersionResponse | null>(null)
+  const [previewVersionId, setPreviewVersionId] = useState<string | null>(null)
 
   const submitDraft = async () => {
     if (!selectedType || creating || draft.systemPrompt.trim() === '') return
@@ -83,6 +132,20 @@ export function SettingsSpecialists({
 
     {selectedType && versions && (
       <div className="specialist-profile-versions">
+        {(() => {
+          const displayed = selectDisplayedVersion(versions, previewVersionId)
+          if (!displayed) return null
+          const isPreview = previewVersionId === displayed.specialistProfileVersionId
+          return <div className="specialist-profile-current">
+            <div className="panel-header-row">
+              {isPreview
+                ? <h3>Podgląd — Wersja {displayed.versionNumber} <span className={`status status-${displayed.status.toLowerCase()}`}>{displayed.status}</span></h3>
+                : <h3>Aktualna konfiguracja</h3>}
+            </div>
+            <SpecialistProfileVersionDetail version={displayed} />
+          </div>
+        })()}
+
         <div className="panel-header-row">
           <h3>Historia wersji — {SPECIALIST_LABELS[selectedType]}</h3>
           {canMutate && <button className="primary" type="button" onClick={() => {
@@ -98,6 +161,9 @@ export function SettingsSpecialists({
             <li key={version.specialistProfileVersionId}>
               <span>Wersja {version.versionNumber}</span>
               <span className={`status status-${version.status.toLowerCase()}`}>{version.status}</span>
+              <button type="button" onClick={() => setPreviewVersionId((current) => current === version.specialistProfileVersionId ? null : version.specialistProfileVersionId)}>
+                {previewVersionId === version.specialistProfileVersionId ? 'Ukryj podgląd' : 'Podgląd'}
+              </button>
               {canMutate && version.status === 'DRAFT' && (
                 <button type="button" onClick={() => setPendingActivate(version)}>Aktywuj</button>
               )}

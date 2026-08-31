@@ -82,6 +82,11 @@ export type SpecialistProfileVersionResponse = {
   excludedResponsibilities: string
   expectedOutputGuidance: string
   modelProfileKey: string
+  // Persisted since migration 064 (max_output_tokens_override) but not yet
+  // selected back out by GET .../versions -- optional here so the "Limit
+  // odpowiedzi" field in Settings -> Specjaliści lights up automatically
+  // once the backend starts returning it, without another frontend change.
+  maxOutputTokensOverride?: number | null
 }
 export type SpecialistProfileVersionCreateInput = {
   systemPrompt: string

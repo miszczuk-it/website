@@ -139,6 +139,12 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .specialist-profile-version-list li span:first-child { flex: 1; font-weight: 700; }
 .specialist-profile-draft-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid #d9e0eb; }
 .specialist-profile-draft-form textarea { min-height: 90px; }
+.specialist-profile-current { margin-top: 18px; padding-bottom: 18px; border-bottom: 1px solid #d9e0eb; }
+.specialist-profile-detail { display: grid; gap: 16px; margin-top: 10px; }
+.specialist-profile-detail-field h4 { margin: 0; }
+.specialist-profile-detail-field-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.system-prompt-viewer { max-height: 320px; overflow-y: auto; margin: 6px 0 0; padding: 14px; border: 1px solid #d9e0eb; border-radius: 10px; background: #f8fafc; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, monospace; font-size: .875rem; }
+.specialist-profile-detail-text { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #344054; }
 
 /* ADR-009 / GAP-018 completion: Kontekst analizy write model. */
 .status-historical { background: #eaecf5; color: #363f72; }
