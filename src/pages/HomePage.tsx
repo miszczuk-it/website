@@ -152,8 +152,8 @@ export function HomePage() {
     <div className="min-h-screen bg-slate-950 text-white">
       <header className="border-b border-slate-800/80 bg-slate-950/95">
         <nav aria-label="Główna nawigacja" className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-8 gap-y-4 px-6 py-5">
-          <a href="#top" className="text-sm font-semibold uppercase tracking-[0.25em] text-sky-400 transition-colors hover:text-sky-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">
-            miszczuk.it
+          <a href="#top" className="shrink-0 rounded-sm transition-opacity hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">
+            <img src="/images/miszczuk-logo.png" alt="miszczuk.it" className="h-8 w-auto sm:h-9" />
           </a>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-300 sm:gap-x-6">
             <a href="#about" className="transition-colors hover:text-sky-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">O mnie</a>
