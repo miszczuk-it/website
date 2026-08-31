@@ -77,13 +77,19 @@ export function HomePage() {
       </header>
 
       <main id="top">
-        <section className="border-b border-slate-800/80">
-          <div className="mx-auto flex min-h-[calc(100vh-77px)] max-w-6xl items-center px-6 py-24 md:py-32">
-            <div className="max-w-4xl">
+        <section
+          className="relative border-b border-slate-800/80 bg-slate-950 bg-[url('/images/industrial-digital-transformation-hero.png')] bg-cover bg-right bg-no-repeat lg:min-h-screen"
+        >
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-linear-to-r from-slate-950/70 from-0% via-slate-950/40 via-45% to-transparent to-70% lg:from-slate-950/55 lg:from-0% lg:via-slate-950/15 lg:via-35% lg:to-transparent lg:to-60%"
+          />
+          <div className="relative mx-auto flex min-h-[calc(100vh-77px)] max-w-6xl items-center px-6 py-24 lg:min-h-screen lg:py-32">
+            <div className="max-w-md lg:max-w-2xl">
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-sky-400">IT Leadership · Digital Transformation · Architecture</p>
               <h1 className="mt-6 text-5xl font-bold tracking-tight text-white sm:text-6xl md:text-7xl">Andrzej Miszczuk</h1>
-              <p className="mt-7 max-w-3xl text-xl leading-9 text-slate-200 md:text-2xl">Łączę zarządzanie IT z praktycznym podejściem do architektury, automatyzacji, cyberbezpieczeństwa, danych i AI.</p>
-              <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-400">Buduję rozwiązania, które wspierają organizacje w bezpiecznej zmianie technologicznej — od strategii i systemów biznesowych po działające produkty demonstracyjne.</p>
+              <p className="mt-7 text-xl leading-9 text-slate-200 md:text-2xl">Łączę zarządzanie IT z praktycznym podejściem do architektury, automatyzacji, cyberbezpieczeństwa, danych i AI.</p>
+              <p className="mt-5 text-lg leading-8 text-slate-400">Buduję rozwiązania, które wspierają organizacje w bezpiecznej zmianie technologicznej — od strategii i systemów biznesowych po działające produkty demonstracyjne.</p>
               <div className="mt-10 flex flex-wrap gap-4">
                 <a href="#projects" className="rounded-full bg-sky-400 px-5 py-3 text-sm font-semibold text-slate-950 transition-colors hover:bg-sky-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">Poznaj projekty <span aria-hidden="true">→</span></a>
                 <a href="#contact" className="rounded-full border border-slate-700 px-5 py-3 text-sm font-semibold text-slate-200 transition-colors hover:border-sky-400/60 hover:text-sky-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">Kontakt</a>
