@@ -93,3 +93,70 @@ describe('RoadMonitorPage manual refresh', () => {
     expect(await screen.findByText('ESP ONLINE')).toBeInTheDocument()
   })
 })
+
+describe('RoadMonitorPage shared 24h/7d history range', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(dashboardApi.getCurrentStatus).mockResolvedValue(status)
+    vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
+    vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
+    vi.mocked(dashboardApi.getDeviceActivityHourly).mockResolvedValue(activity)
+  })
+
+  it('starts both the weather history and ESP activity charts on the 24h range', async () => {
+    render(<RoadMonitorPage />)
+
+    await waitFor(() => expect(dashboardApi.getWeatherHistory).toHaveBeenCalledWith(24, false))
+    await waitFor(() => expect(dashboardApi.getDeviceActivityHourly).toHaveBeenCalledWith(undefined, 24))
+  })
+
+  it('switches both charts to hours=168 when "7 dni" is clicked', async () => {
+    const user = userEvent.setup()
+    render(<RoadMonitorPage />)
+    await waitFor(() => expect(dashboardApi.getWeatherHistory).toHaveBeenCalledWith(24, false))
+
+    await user.click(await screen.findByRole('button', { name: '7 dni' }))
+
+    await waitFor(() => expect(dashboardApi.getWeatherHistory).toHaveBeenCalledWith(168, false))
+    await waitFor(() => expect(dashboardApi.getDeviceActivityHourly).toHaveBeenCalledWith(undefined, 168))
+  })
+
+  it('switches both charts back to hours=24 when "24 h" is clicked again', async () => {
+    const user = userEvent.setup()
+    render(<RoadMonitorPage />)
+    await waitFor(() => expect(dashboardApi.getWeatherHistory).toHaveBeenCalledWith(24, false))
+
+    await user.click(await screen.findByRole('button', { name: '7 dni' }))
+    await waitFor(() => expect(dashboardApi.getDeviceActivityHourly).toHaveBeenCalledWith(undefined, 168))
+
+    await user.click(await screen.findByRole('button', { name: '24 h' }))
+
+    await waitFor(() =>
+      expect(dashboardApi.getWeatherHistory).toHaveBeenLastCalledWith(24, false),
+    )
+    await waitFor(() =>
+      expect(dashboardApi.getDeviceActivityHourly).toHaveBeenLastCalledWith(undefined, 24),
+    )
+  })
+})
+
+describe('RoadMonitorPage architecture section', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(dashboardApi.getCurrentStatus).mockResolvedValue(status)
+    vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
+    vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
+    vi.mocked(dashboardApi.getDeviceActivityHourly).mockResolvedValue(activity)
+  })
+
+  it('renders the architecture image with a descriptive alt and no ASCII diagram', async () => {
+    render(<RoadMonitorPage />)
+
+    const image = await screen.findByAltText(/Architektura IoT Road Monitor/)
+    expect(image).toBeInTheDocument()
+    expect(image.tagName).toBe('IMG')
+    expect(image.getAttribute('src')).toBe('/images/iot-road-monitor-architecture.png')
+    expect(screen.queryByText(/ESP32 \/ czujniki środowiskowe/)).not.toBeInTheDocument()
+    expect(document.querySelector('pre')).not.toBeInTheDocument()
+  })
+})

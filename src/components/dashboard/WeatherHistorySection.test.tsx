@@ -34,7 +34,16 @@ function point(overrides: Partial<DashboardWeatherHourlyPoint>): DashboardWeathe
 function renderSection(history: DashboardWeatherHistory) {
   vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
   const onRefreshComplete = vi.fn()
-  render(<WeatherHistorySection refreshKey={0} forceRefresh={false} onRefreshComplete={onRefreshComplete} />)
+  const onHoursChange = vi.fn()
+  render(
+    <WeatherHistorySection
+      hours={24}
+      onHoursChange={onHoursChange}
+      refreshKey={0}
+      forceRefresh={false}
+      onRefreshComplete={onRefreshComplete}
+    />,
+  )
   return waitFor(() => expect(dashboardApi.getWeatherHistory).toHaveBeenCalled())
 }
 
