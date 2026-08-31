@@ -1,4 +1,5 @@
 import type { DashboardLocalComparison, DashboardWeatherSnapshot } from '../../lib/dashboardTypes'
+import { formatDateTime } from '../../lib/format'
 
 interface LocalWeatherComparisonProps {
   comparison: DashboardLocalComparison
@@ -101,6 +102,13 @@ export function LocalWeatherComparison({ comparison, weather }: LocalWeatherComp
   return (
     <div className="mt-6">
       <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Lokalnie vs WeatherAPI</h4>
+      {comparison.local_observed_at != null && (
+        // KI-001: after the backend fix, this comparison row can legitimately be a bit older
+        // than the newest raw local telemetry (it waits for a matched WeatherAPI observation),
+        // so the row's own timestamp is shown here -- deliberately not labeled "ostatnia
+        // aktualizacja", which would read as the newest telemetry timestamp.
+        <p className="mt-1 text-xs text-slate-500">Porównanie dla: {formatDateTime(comparison.local_observed_at)}</p>
+      )}
 
       <table className="mt-3 hidden w-full text-left text-sm md:table">
         <caption className="sr-only">Porównanie pomiarów lokalnych z WeatherAPI</caption>
