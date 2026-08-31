@@ -9,11 +9,10 @@ type Project = {
   flow?: string
   value: string
   technologies: string[]
-} & (
-  | { href: string; external?: false; linkLabel: string }
-  | { href: string; external: true; linkLabel: string }
-  | { href?: undefined }
-)
+  href: string
+  external?: boolean
+  linkLabel: string
+}
 
 const projects: Project[] = [
   {
@@ -34,6 +33,9 @@ const projects: Project[] = [
     approach: 'Projektuję aplikację prowadzącą przez wymagania, ocenę zgodności oraz kontrolę ryzyka w jednym, spójnym procesie.',
     value: 'Pokazuje przełożenie wymagań regulacyjnych i wiedzy o cyberbezpieczeństwie na konkretne, używalne narzędzie.',
     technologies: ['Cybersecurity', 'NIS2', 'KSC', 'Compliance', 'Risk'],
+    href: 'https://ksc.miszczuk.it',
+    external: true,
+    linkLabel: 'Zobacz aplikację KSC / NIS2',
   },
   {
     name: 'AI Platform',
@@ -64,6 +66,50 @@ const experienceHighlights = [
   'Od strategii do działającego rozwiązania',
 ]
 
+const iconProps = {
+  viewBox: '0 0 24 24',
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+  className: 'h-6 w-6 text-sky-400/80',
+}
+
+const competencyIcons = [
+  <svg key="strategy" {...iconProps}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M15 9l-2 4-4 2 2-4 4-2Z" />
+  </svg>,
+  <svg key="erp" {...iconProps}>
+    <polygon points="12 3 4 7.5 12 12 20 7.5 12 3" />
+    <polyline points="4 12 12 16.5 20 12" />
+    <polyline points="4 16.5 12 21 20 16.5" />
+  </svg>,
+  <svg key="architecture" {...iconProps}>
+    <circle cx="5" cy="6" r="2" />
+    <circle cx="19" cy="6" r="2" />
+    <circle cx="12" cy="19" r="2" />
+    <line x1="6.5" y1="7.2" x2="10.7" y2="17.3" />
+    <line x1="17.5" y1="7.2" x2="13.3" y2="17.3" />
+    <line x1="7" y1="6" x2="17" y2="6" />
+  </svg>,
+  <svg key="security" {...iconProps}>
+    <path d="M12 3 5 6v5c0 5 3 8.5 7 10 4-1.5 7-5 7-10V6l-7-3Z" />
+    <path d="M9 12.5 11 14.5 15 10" />
+  </svg>,
+  <svg key="data" {...iconProps}>
+    <line x1="5" y1="19" x2="5" y2="13" />
+    <line x1="10.5" y1="19" x2="10.5" y2="7" />
+    <line x1="16" y1="19" x2="16" y2="10" />
+    <line x1="21" y1="19" x2="3" y2="19" />
+  </svg>,
+  <svg key="automation" {...iconProps}>
+    <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z" />
+  </svg>,
+]
+
 const technologyGroups: [string, string][] = [
   ['Enterprise', 'ERP · Microsoft 365 · Azure'],
   ['Data & Automation', 'Databricks · PostgreSQL · n8n'],
@@ -82,7 +128,6 @@ function SectionHeading({ eyebrow, id, title, description }: { eyebrow: string; 
 }
 
 function ProjectLink({ project }: { project: Project }) {
-  if (!project.href) return null
   const linkClassName = 'font-semibold text-sky-300 transition-colors hover:text-sky-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300'
 
   if (project.external) {
@@ -165,8 +210,8 @@ export function HomePage() {
             <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {competencies.map(([title, description], index) => (
                 <article key={title} className="rounded-xl border border-slate-800 bg-slate-950/60 p-6">
-                  <p className="text-xs font-semibold tracking-[0.15em] text-sky-400/70">{String(index + 1).padStart(2, '0')}</p>
-                  <h3 className="mt-2 text-lg font-semibold text-white">{title}</h3>
+                  {competencyIcons[index]}
+                  <h3 className="mt-4 text-lg font-semibold text-white">{title}</h3>
                   <p className="mt-2 leading-6 text-slate-400">{description}</p>
                 </article>
               ))}
@@ -189,13 +234,7 @@ export function HomePage() {
                 <p className="mt-4 leading-7 text-slate-300">{project.value}</p>
                 <p className="mt-6 text-sm text-slate-500">{project.technologies.join(' · ')}</p>
                 <div className="mt-auto pt-8">
-                  {project.href ? (
-                    <ProjectLink project={project} />
-                  ) : (
-                    <p className="text-sm text-slate-500">
-                      Link do aplikacji: w przygotowaniu <span className="text-slate-600">(TODO: uzupełnić potwierdzony publiczny URL KSC / NIS2)</span>
-                    </p>
-                  )}
+                  <ProjectLink project={project} />
                 </div>
               </article>
             ))}
