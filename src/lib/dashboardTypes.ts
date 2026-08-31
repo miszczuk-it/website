@@ -71,6 +71,10 @@ export interface DashboardDeviceStatus {
   last_telemetry_received_at: string | null
 }
 
+// Shared 24h/7d range selector for the history charts (weather + ESP activity) on
+// RoadMonitorPage -- kept as one type so both sections stay in sync with a single control.
+export type HistoryRangeHours = 24 | 168
+
 export interface DashboardWeatherHistory {
   location_id: string
   from: string

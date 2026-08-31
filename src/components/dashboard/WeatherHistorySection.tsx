@@ -1,27 +1,34 @@
 import { useEffect, useState } from 'react'
 import { getWeatherHistory } from '../../lib/dashboardApi'
-import type { DashboardWeatherHistory } from '../../lib/dashboardTypes'
+import type { DashboardWeatherHistory, HistoryRangeHours } from '../../lib/dashboardTypes'
 import { LineChart } from './LineChart'
 
-const RANGES = [
+const RANGES: { label: string; hours: HistoryRangeHours }[] = [
   { label: '24 h', hours: 24 },
   { label: '7 dni', hours: 168 },
-] as const
+]
 
 interface HistoryResult {
-  hours: number
+  hours: HistoryRangeHours
   history: DashboardWeatherHistory | null
   error: boolean
 }
 
 interface WeatherHistorySectionProps {
+  hours: HistoryRangeHours
+  onHoursChange: (hours: HistoryRangeHours) => void
   refreshKey: number
   forceRefresh: boolean
   onRefreshComplete: (source: 'history', key: number, successful: boolean) => void
 }
 
-export function WeatherHistorySection({ refreshKey, forceRefresh, onRefreshComplete }: WeatherHistorySectionProps) {
-  const [hours, setHours] = useState<number>(24)
+export function WeatherHistorySection({
+  hours,
+  onHoursChange,
+  refreshKey,
+  forceRefresh,
+  onRefreshComplete,
+}: WeatherHistorySectionProps) {
   const [result, setResult] = useState<HistoryResult | null>(null)
 
   useEffect(() => {
@@ -76,7 +83,7 @@ export function WeatherHistorySection({ refreshKey, forceRefresh, onRefreshCompl
             <button
               key={range.hours}
               type="button"
-              onClick={() => setHours(range.hours)}
+              onClick={() => onHoursChange(range.hours)}
               aria-pressed={hours === range.hours}
               className={`rounded-full border px-4 py-1.5 text-sm transition-colors ${
                 hours === range.hours

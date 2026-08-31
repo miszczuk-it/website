@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from '../router'
 import { useDocumentMeta } from '../lib/useDocumentMeta'
 import { getCurrentStatus, getDeviceStatus } from '../lib/dashboardApi'
-import type { DashboardCurrentStatus, DashboardDeviceStatus } from '../lib/dashboardTypes'
+import type { DashboardCurrentStatus, DashboardDeviceStatus, HistoryRangeHours } from '../lib/dashboardTypes'
 import { CurrentConditionsCard } from '../components/dashboard/CurrentConditionsCard'
 import { WeatherHistorySection } from '../components/dashboard/WeatherHistorySection'
 import { DeviceActivitySection } from '../components/dashboard/DeviceActivitySection'
@@ -40,6 +40,7 @@ export function RoadMonitorPage() {
   const [deviceStatus, setDeviceStatus] = useState<DashboardDeviceStatus | null>(null)
   const [deviceStatusError, setDeviceStatusError] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [historyHours, setHistoryHours] = useState<HistoryRangeHours>(24)
   const [forceRefresh, setForceRefresh] = useState(false)
   const [refreshing, setRefreshing] = useState(true)
   const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<number | null>(null)
@@ -176,25 +177,14 @@ export function RoadMonitorPage() {
           <h2 id="architecture-heading" className="text-2xl font-bold tracking-tight text-white">
             Architektura
           </h2>
-          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-            <pre className="whitespace-pre text-sm leading-6 text-slate-300">
-{`ESP32 / czujniki środowiskowe (produkcyjnie aktywne)
-      │
-      ▼
-IoT API (ASP.NET Core)
-      │
-      ▼
-PostgreSQL
-      │
-      ▼
-n8n
-      │
-      ▼
-Databricks: RAW → SILVER → GOLD
-      │
-      ▼
-dashboard (ta strona)`}
-            </pre>
+          <div className="mt-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-900/40">
+            <img
+              src="/images/iot-road-monitor-architecture.png"
+              alt="Architektura IoT Road Monitor: dwa moduły ESP32, IoT API, PostgreSQL, n8n, Databricks i dashboard"
+              className="h-auto w-full"
+              width={1482}
+              height={515}
+            />
           </div>
           <p className="mt-3 text-sm text-slate-500">
             Dane pogodowe są agregowane co godzinę, a nie strumieniowane w czasie rzeczywistym.
@@ -235,9 +225,15 @@ dashboard (ta strona)`}
           </div>
         </section>
 
-        <WeatherHistorySection refreshKey={refreshKey} forceRefresh={forceRefresh} onRefreshComplete={handleRefreshComplete} />
+        <WeatherHistorySection
+          hours={historyHours}
+          onHoursChange={setHistoryHours}
+          refreshKey={refreshKey}
+          forceRefresh={forceRefresh}
+          onRefreshComplete={handleRefreshComplete}
+        />
 
-        <DeviceActivitySection refreshKey={refreshKey} onRefreshComplete={handleRefreshComplete} />
+        <DeviceActivitySection hours={historyHours} refreshKey={refreshKey} onRefreshComplete={handleRefreshComplete} />
 
         <TrafficSection />
 
