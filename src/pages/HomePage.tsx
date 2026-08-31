@@ -219,10 +219,8 @@ export function HomePage() {
           <div className="mt-10 grid gap-6 lg:grid-cols-3">
             {projects.map((project) => (
               <article key={project.name} className="flex h-full flex-col rounded-2xl border border-slate-800 bg-slate-900/40 p-6 sm:p-7">
-                <div className="flex items-start justify-between gap-4">
-                  <h3 className="text-2xl font-bold tracking-tight text-white">{project.name}</h3>
-                  <span className="shrink-0 rounded-full border border-sky-400/25 bg-sky-400/10 px-2.5 py-1 text-xs font-semibold text-sky-300">{project.status}</span>
-                </div>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-sky-400/80">{project.status}</p>
+                <h3 className="mt-2 text-2xl font-bold tracking-tight text-white">{project.name}</h3>
                 <p className="mt-6 leading-7 text-slate-300">{project.description}</p>
                 {project.flow && <p className="mt-5 rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 font-mono text-xs leading-5 text-sky-200">{project.flow}</p>}
                 <p className="mt-4 leading-7 text-slate-400">{project.value}</p>
