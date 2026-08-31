@@ -37,7 +37,14 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .result-grid dt { font-weight: 800; }
 .result-grid dd { margin: 0; overflow-wrap: anywhere; }
 .success-message { color: #067647; font-weight: 800; }
-.artifact-version-content pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; border: 1px solid #d9e0eb; border-radius: 10px; background: #f8fafc; }
+.artifact-version-content { position: relative; }
+.artifact-version-content pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 44px 14px 14px; border: 1px solid #d9e0eb; border-radius: 10px; background: #f8fafc; }
+.artifact-export-toolbar { position: absolute; top: 8px; right: 8px; z-index: 1; }
+.artifact-export-buttons { display: flex; gap: 4px; }
+.artifact-export-buttons button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; font-size: .75rem; font-weight: 600; line-height: 1; border: 1px solid #d9e0eb; border-radius: 6px; background: #fff; color: #344054; cursor: pointer; }
+.artifact-export-buttons button:hover, .artifact-export-buttons button:focus-visible { background: #f2f4f7; }
+.artifact-export-buttons button:focus-visible { outline: 2px solid #84adff; outline-offset: -2px; }
+.artifact-export-toolbar [role="status"] { position: absolute; top: 100%; right: 0; margin-top: 4px; white-space: nowrap; font-size: .75rem; }
 .artifact-decisions { display: grid; gap: 10px; margin-top: 12px; }
 .artifact-decision-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
 .artifact-new-version-form { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #d9e0eb; }
@@ -105,7 +112,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .details-toggle { border: none; background: none; padding: 0; color: #667085; font-size: .8rem; cursor: pointer; text-decoration: underline; }
 .technical-details { margin-top: 10px; font-size: .8rem; }
 .login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 0, #e6efff, #f8fafc 48%, #eef2f7); }.login-card { width: min(100%, 450px); padding: 44px; background: #fff; border: 1px solid #e4e7ec; border-radius: 20px; box-shadow: 0 20px 50px rgb(16 24 40 / 12%); text-align: center; }.brand-mark { width: 46px; height: 46px; display: grid; place-items: center; margin: 0 auto 16px; border-radius: 13px; color: #fff; font-weight: 800; background: linear-gradient(135deg, #2457d6, #6f42c1); }.login-card h1 { margin: 8px 0 12px; font-size: 1.75rem; }.login-copy { color: #526078; line-height: 1.6; margin-bottom: 28px; }.google-button { width: 100%; min-height: 48px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #344054; font-weight: 600; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 12px; }.google-button:focus-visible, .microsoft-button:focus-visible, .secondary:focus-visible, .dev-summary:focus-visible { outline: 3px solid #84adff; outline-offset: 2px; }.google-g { color: #4285f4; font-size: 1.25rem; font-weight: 700; }.microsoft-button { width: 100%; min-height: 48px; margin-top: 12px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #344054; font-weight: 600; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 12px; }.microsoft-m { color: #00a4ef; font-size: 1.25rem; font-weight: 700; }.security-note { font-size: .875rem; color: #667085; }.dev-options { text-align: left; margin-top: 24px; padding-top: 18px; border-top: 1px solid #eaecf0; }.dev-summary, .secondary { border: 1px solid #d0d5dd; background: #fff; padding: 8px 12px; border-radius: 6px; cursor: pointer; }.dev-options label { display: grid; gap: 6px; margin: 14px 0; }
-.user-menu { position: relative; margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.user-menu { position: relative; margin-left: auto; width: fit-content; display: flex; align-items: center; gap: 10px; }
 .user-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
 .user-avatar-fallback { display: grid; place-items: center; background: #dbe7ff; color: #1d4ed8; font-weight: 700; }
 .user-menu-name { font-weight: 600; }
@@ -117,7 +124,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .user-menu-content button:hover, .user-menu-content button:focus-visible { background: #f2f4f7; }
 .user-menu-content button:focus-visible { outline: 2px solid #84adff; outline-offset: -2px; }
 .user-menu-separator { border: none; border-top: 1px solid #eaecf0; margin: 4px 0; }
-.artifact-export-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0; }
 .processing-indicator { display: flex; align-items: center; gap: 8px; color: #155eef; font-weight: 700; }
 
 /* ADR-009 / GAP-018: Settings -> Specjaliści. */
