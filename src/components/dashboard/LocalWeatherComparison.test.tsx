@@ -96,6 +96,19 @@ describe('LocalWeatherComparison', () => {
     expect(within(pressureRow).getByText('1015 hPa')).toBeInTheDocument() // WeatherAPI pressure still shown
   })
 
+  it('shows a "Porównanie dla" timestamp when local_observed_at is present (KI-001)', () => {
+    render(<LocalWeatherComparison comparison={freshComparison} weather={weather} />)
+
+    expect(screen.getByText(/Porównanie dla:/)).toBeInTheDocument()
+    expect(screen.queryByText(/Ostatnia aktualizacja/)).not.toBeInTheDocument()
+  })
+
+  it('does not show a comparison timestamp when local_observed_at is null (KI-001)', () => {
+    render(<LocalWeatherComparison comparison={emptyComparison} weather={weather} />)
+
+    expect(screen.queryByText(/Porównanie dla:/)).not.toBeInTheDocument()
+  })
+
   it('never renders NaN, null, or undefined literally', () => {
     const { container: emptyContainer } = render(<LocalWeatherComparison comparison={emptyComparison} weather={weather} />)
     expect(emptyContainer.textContent).not.toMatch(/NaN|null|undefined/)
