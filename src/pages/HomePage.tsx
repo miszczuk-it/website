@@ -4,8 +4,7 @@ import { Link } from '../router'
 type Project = {
   name: string
   status: string
-  goal: string
-  approach: string
+  description: string
   flow?: string
   value: string
   technologies: string[]
@@ -17,20 +16,18 @@ type Project = {
 const projects: Project[] = [
   {
     name: 'IoT Road Monitor',
-    status: 'Aktywny projekt',
-    goal: 'Przy drodze brakowało wiarygodnego, ciągłego pomiaru warunków środowiskowych.',
-    approach: 'Zaprojektowałem i wdrożyłem pełny przepływ danych — od czujnika, przez API i bazę danych, po warstwę analityczną — z myślą o utrzymaniu i dalszej rozbudowie.',
+    status: 'Projekt hobbystyczny',
+    description: 'Hobbystyczny projekt rozwijany w miejscu, w którym odpoczywam. Łączę w nim ESP32 i czujniki z API, bazą danych, automatyzacją i analityką w Databricks, wykorzystując małą skalę do praktycznego testowania architektury i „dorosłych” technologii end-to-end.',
     flow: 'ESP32 → API → PostgreSQL → Databricks',
-    value: 'Działający system produkcyjny: dowód przejścia od koncepcji i architektury do rozwiązania, które realnie zbiera i udostępnia dane.',
+    value: 'Pokazuje moje podejście do architektury i technologii end-to-end w praktyce — na małą skalę, ale bez taryfy ulgowej.',
     technologies: ['ESP32', '.NET', 'PostgreSQL', 'n8n', 'Databricks', 'React'],
     href: '/road-monitor',
     linkLabel: 'Zobacz dashboard IoT Road Monitor',
   },
   {
     name: 'KSC / NIS2',
-    status: 'W rozwoju',
-    goal: 'Organizacje objęte NIS2/KSC potrzebują uporządkowanego sposobu pracy z wymaganiami, dowodami zgodności i ryzykiem — nie kolejnego arkusza kalkulacyjnego.',
-    approach: 'Projektuję aplikację prowadzącą przez wymagania, ocenę zgodności oraz kontrolę ryzyka w jednym, spójnym procesie.',
+    status: 'Rozwijany produkt',
+    description: 'Projekt aplikacji wspierającej organizacje w porządkowaniu wymagań cyberbezpieczeństwa i zgodności. Łączy katalog wymagań, ocenę spełnienia, dowody, kontrole i pracę z ryzykiem. Rozwijam go z myślą o praktycznym wykorzystaniu w organizacjach przygotowujących się do wymagań KSC i NIS2.',
     value: 'Pokazuje przełożenie wymagań regulacyjnych i wiedzy o cyberbezpieczeństwie na konkretne, używalne narzędzie.',
     technologies: ['Cybersecurity', 'NIS2', 'KSC', 'Compliance', 'Risk'],
     href: 'https://ksc.miszczuk.it',
@@ -39,10 +36,9 @@ const projects: Project[] = [
   },
   {
     name: 'AI Platform',
-    status: 'W rozwoju',
-    goal: 'Zespoły IT potrzebują wsparcia wyspecjalizowanych agentów AI w codziennych procesach — bez utraty kontroli nad decyzjami.',
-    approach: 'Buduję platformę łączącą role agentów, orkiestrację i integracje, z jawnym miejscem na decyzję człowieka (Human in the Loop).',
-    value: 'Demonstruje praktyczne, odpowiedzialne wdrożenie AI w procesach organizacyjnych — nie tylko koncepcję.',
+    status: 'Projekt eksperymentalno-produktowy',
+    description: 'Projekt platformy do pracy z wyspecjalizowanymi agentami AI wspierającymi zadania zespołów IT. Łączy role agentów, orkiestrację, integracje, automatyzację i audyt działań. Rozwijam go jako rozwiązanie z potencjałem do wykorzystania w rzeczywistych procesach operacyjnych i projektowych.',
+    value: 'Pokazuje odpowiedzialne podejście do wdrażania AI w procesach organizacyjnych — z zachowaniem kontroli i audytu decyzji.',
     technologies: ['AI agents', 'LLM', 'Orchestration', 'Automation', 'Integration'],
     href: 'https://app.miszczuk.it',
     external: true,
@@ -164,7 +160,6 @@ export function HomePage() {
             <a href="#skills" className="transition-colors hover:text-sky-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">Kompetencje</a>
             <a href="#projects" className="transition-colors hover:text-sky-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">Projekty</a>
             <a href="#contact" className="transition-colors hover:text-sky-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">Kontakt</a>
-            <Link to="/road-monitor" className="rounded-full border border-sky-400/40 px-3 py-1.5 font-medium text-sky-300 transition-colors hover:bg-sky-400/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sky-300">Road Monitor</Link>
           </div>
         </nav>
       </header>
@@ -228,10 +223,9 @@ export function HomePage() {
                   <h3 className="text-2xl font-bold tracking-tight text-white">{project.name}</h3>
                   <span className="shrink-0 rounded-full border border-sky-400/25 bg-sky-400/10 px-2.5 py-1 text-xs font-semibold text-sky-300">{project.status}</span>
                 </div>
-                <p className="mt-6 leading-7 text-slate-300">{project.goal}</p>
-                <p className="mt-4 leading-7 text-slate-400">{project.approach}</p>
+                <p className="mt-6 leading-7 text-slate-300">{project.description}</p>
                 {project.flow && <p className="mt-5 rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 font-mono text-xs leading-5 text-sky-200">{project.flow}</p>}
-                <p className="mt-4 leading-7 text-slate-300">{project.value}</p>
+                <p className="mt-4 leading-7 text-slate-400">{project.value}</p>
                 <p className="mt-6 text-sm text-slate-500">{project.technologies.join(' · ')}</p>
                 <div className="mt-auto pt-8">
                   <ProjectLink project={project} />
