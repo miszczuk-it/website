@@ -3,13 +3,14 @@ import type {
   AnalysisContextEntry, AnalysisContextResponse, ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, ContextSection, ContextVersionSummary, ExecutionStatusResponse, SessionListItem, SessionWorkflowResponse,
   SpecialistProfileResponse, SpecialistProfileVersionCreateInput, SpecialistProfileVersionResponse, SpecialistTaskType,
 } from '../types.js'
-import { runGuarded, type SingleFlightGuard } from '../lib/execution-flow.js'
+import { EXECUTION_POLLING_STATUSES, runGuarded, type SingleFlightGuard } from '../lib/execution-flow.js'
 import { createPlatformApiClient } from '../lib/platform-api.js'
 import { PlatformApiError, toSafeUiError } from '../lib/safe-error.js'
-import { createMockVs1Service, createRealVs1Service, type Vs1Detail, type Vs1Service } from '../lib/vs1-service.js'
+import { createMockVs1Service, createRealVs1Service, watchOpenAnalysis, type Vs1Detail, type Vs1Service } from '../lib/vs1-service.js'
 import { AnalysisList } from './AnalysisList.js'
 import { AnalysisDetail } from './AnalysisDetail.js'
 import { SettingsSpecialists } from './SettingsSpecialists.js'
+import { UserMenu } from './UserMenu.js'
 
 const DEFAULT_FAILED_FINAL_MESSAGE = 'Wykonanie zakończyło się błędem, którego nie można ponowić.'
 
@@ -254,22 +255,53 @@ export function VerticalSliceWorkspace({ apiBaseUrl, apiEnabled, identity: initi
   }
   useEffect(() => { service.me().then(async (me) => { setUser(me); setSessions(await service.listSessions()) }).catch(() => undefined) }, [service])
 
+  // BUG-1 fix: keep the currently OPEN analysis live while its Execution is
+  // still in flight -- covers both a run() action's own bounded wait giving
+  // up too early and simply opening/reopening an analysis that is still
+  // being worked on. Re-runs the same canonical getDetail() (which already
+  // owns ensureArtifact()) on a bounded interval; see watchOpenAnalysis's
+  // own comment in vs1-service.ts for why this is needed instead of trusting
+  // the initiating action alone.
+  const watchController = useRef<ReturnType<typeof watchOpenAnalysis> | null>(null)
+  useEffect(() => {
+    watchController.current?.stop()
+    watchController.current = null
+    if (!detail || view !== 'workspace' || preview || !EXECUTION_POLLING_STATUSES.has(detail.execution.status)) return
+    const sessionId = detail.session.sessionId
+    let reachedTerminal = false
+    const controller = watchOpenAnalysis(service, sessionId, {
+      onDetail: (next) => {
+        setDetail(next)
+        if (!EXECUTION_POLLING_STATUSES.has(next.execution.status)) {
+          reachedTerminal = true
+          void loadWorkflow(sessionId)
+        }
+      },
+    })
+    watchController.current = controller
+    controller.whenDone.then(() => {
+      if (!reachedTerminal && watchController.current === controller) {
+        setNotice('Analiza nadal się przetwarza. Odśwież widok za chwilę, wracając do „Moje analizy” i otwierając ją ponownie.')
+      }
+    })
+    return () => { controller.stop() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the execution's own in-flight status and the open session identity should restart this watcher, not every `detail` reference change it itself produces
+  }, [detail?.session.sessionId, detail?.execution.status, view, preview, service])
+
   if (!user) return <main className="app-shell"><section className="panel"><h1>Sesja wygasła</h1><p>Zaloguj się ponownie, aby kontynuować.</p></section></main>
 
   return <main className="app-shell">
     <header className="hero">
       <p className="eyebrow">AI Platform</p>
       <h1>Moje analizy</h1>
-      <div className="user-menu">
-        {user.picture ? <img className="user-avatar" src={user.picture} alt="" /> : <span className="user-avatar user-avatar-fallback" aria-hidden="true">{user.displayName.slice(0, 1).toUpperCase()}</span>}
-        <details><summary>{user.displayName}</summary><div className="user-menu-content">
-          <span>Profil</span>
-          {platformApi && user.effectiveRole !== 'OBSERVER' && <button type="button" onClick={() => (view === 'settings' ? setView('workspace') : openSettings())}>
-            {view === 'settings' ? 'Moje analizy' : 'Ustawienia'}
-          </button>}
-          <button type="button" onClick={() => (onLogout ? onLogout() : service.logout()).then(() => { setUser(null); setDetail(null); setWorkflow(null) }).catch(report)}>Wyloguj</button>
-        </div></details>
-      </div>
+      <UserMenu
+        displayName={user.displayName}
+        picture={user.picture}
+        showSettings={Boolean(platformApi) && user.effectiveRole !== 'OBSERVER'}
+        settingsLabel={view === 'settings' ? 'Moje analizy' : 'Ustawienia'}
+        onOpenSettings={() => (view === 'settings' ? setView('workspace') : openSettings())}
+        onLogout={() => { void (onLogout ? onLogout() : service.logout()).then(() => { setUser(null); setDetail(null); setWorkflow(null) }).catch(report) }}
+      />
     </header>
     {notice && <p className="notice" role="alert">{notice}</p>}
 

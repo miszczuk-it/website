@@ -1,6 +1,6 @@
 import { PlatformApiError } from './safe-error.js'
 import { createPlatformApiClient, type PlatformApiClient } from './platform-api.js'
-import { EXECUTION_POLLING_STATUSES, trackExecutionStatus } from './execution-flow.js'
+import { EXECUTION_POLLING_STATUSES, trackExecutionStatus, type PollController } from './execution-flow.js'
 import type { ArtifactResponse, ArtifactVersionResponse, AuthMeResponse, EffectiveRole, ExecutionResponse, ExecutionStatusResponse, SessionListItem, SessionWorkflowResponse } from '../types.js'
 
 export type Vs1Detail = {
@@ -239,6 +239,67 @@ async function resolveSessionForExecution(client: PlatformApiClient, executionId
   const execution = await client.getExecution(executionId, correlationId)
   const task = await client.getTask(execution.taskId, correlationId)
   return client.getSession(task.sessionId, correlationId)
+}
+
+// BUG-1 fix (PROD UX hotfix, 2026-08-30): waitForExecution()'s own bounded
+// wait above (~20s) only covers the single action that started/advanced an
+// Execution -- it exists to keep that action's own Promise from hanging
+// forever, not to guarantee the Execution actually finishes in time. A real
+// specialist call routinely outlives it: the 'reasoning' LLM Gateway
+// profile alone has a 180s timeout_seconds with up to 2 primary attempts
+// plus a fallback profile (database/seed/006_llm_gateway_runtime_dev_seed.sql),
+// so a legitimate in-flight Execution can run for several minutes. Once
+// run()'s action resolves non-terminal, nothing in VerticalSliceWorkspace
+// re-checked it again -- the Owner had to leave "Moje analizy" and reopen
+// the same analysis (a fresh getDetail()) to ever see the result, sometimes
+// repeatedly. This watches whichever analysis is currently OPEN for as long
+// as its Execution stays in flight, re-running the exact same canonical
+// getDetail() (which already owns ensureArtifact()) on an interval --
+// deliberately reusing that one read instead of a second, competing
+// polling mechanism. Bounded (WATCH_POLL_MAX_ATTEMPTS) so a callback that
+// genuinely never arrives cannot poll forever.
+const WATCH_POLL_INTERVAL_MS = 4_000
+const WATCH_POLL_MAX_ATTEMPTS = 150 // ~10 minutes at the interval above
+
+export type DetailPollController = PollController
+export type WatchOpenAnalysisOptions = {
+  intervalMs?: number
+  maxAttempts?: number
+  wait?: (milliseconds: number) => Promise<void>
+  onDetail?: (detail: Vs1Detail) => void
+  onError?: (error: unknown) => void
+}
+
+export function watchOpenAnalysis(
+  service: Pick<Vs1Service, 'getDetail'>,
+  sessionId: string,
+  options: WatchOpenAnalysisOptions = {},
+): DetailPollController {
+  let cancelled = false
+  const wait = options.wait ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)))
+  const intervalMs = options.intervalMs ?? WATCH_POLL_INTERVAL_MS
+  const maxAttempts = options.maxAttempts ?? WATCH_POLL_MAX_ATTEMPTS
+
+  const whenDone = (async () => {
+    let attempts = 0
+    while (!cancelled && attempts < maxAttempts) {
+      await wait(intervalMs)
+      if (cancelled) return
+      attempts += 1
+      let detail: Vs1Detail
+      try {
+        detail = await service.getDetail(sessionId)
+      } catch (error) {
+        if (!cancelled) options.onError?.(error)
+        return
+      }
+      if (cancelled) return
+      options.onDetail?.(detail)
+      if (!EXECUTION_POLLING_STATUSES.has(detail.execution.status)) return
+    }
+  })()
+
+  return { stop: () => { cancelled = true }, whenDone }
 }
 
 export function createRealVs1Service(baseUrl: string): Vs1Service {
