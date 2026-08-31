@@ -14,6 +14,13 @@ import { SharedContextPanel } from './SharedContextPanel.js'
 // lib/artifact-export.ts helpers ArtifactReviewPanel already relies on, for
 // both the current result and the read-only historical preview below,
 // rather than re-implementing export/copy a third time.
+//
+// UX follow-up (2026-08-31): rendered as a floating icon toolbar in the
+// top-right corner of `.artifact-version-content` (Owner feedback: the
+// original below-content button row was easy to miss; ChatGPT-style
+// corner icons on the artifact itself match user expectations better).
+// Must be a child of the `position: relative` content box, not a sibling
+// after it -- see the `.artifact-export-toolbar` positioning in styles.css.
 function ArtifactExportActions({ artifact, version }: { artifact: ArtifactResponse; version: ArtifactVersionResponse }) {
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
   async function copy() {
@@ -24,10 +31,12 @@ function ArtifactExportActions({ artifact, version }: { artifact: ArtifactRespon
       setCopyNotice('Nie udało się skopiować wyniku.')
     }
   }
-  return <div className="artifact-export-actions">
-    <button type="button" onClick={() => void copy()}>Kopiuj</button>
-    <button type="button" onClick={() => downloadText(artifactMarkdown(artifact, version), artifactExportName(artifact, version, 'md'), 'text/markdown')}>Pobierz .md</button>
-    <button type="button" onClick={() => downloadText(artifactContent(version), artifactExportName(artifact, version, 'txt'), 'text/plain')}>Pobierz .txt</button>
+  return <div className="artifact-export-toolbar">
+    <div className="artifact-export-buttons">
+      <button type="button" title="Kopiuj" onClick={() => void copy()}><span aria-hidden="true">⧉</span>Kopiuj</button>
+      <button type="button" title="Pobierz jako Markdown" onClick={() => downloadText(artifactMarkdown(artifact, version), artifactExportName(artifact, version, 'md'), 'text/markdown')}><span aria-hidden="true">⬇</span>Pobierz .md</button>
+      <button type="button" title="Pobierz jako tekst" onClick={() => downloadText(artifactContent(version), artifactExportName(artifact, version, 'txt'), 'text/plain')}><span aria-hidden="true">⬇</span>Pobierz .txt</button>
+    </div>
     {copyNotice && <p role="status" className={copyNotice === 'Skopiowano' ? 'success-message' : undefined}>{copyNotice}</p>}
   </div>
 }
@@ -100,8 +109,10 @@ function ArtifactPreviewPanel({ preview, onClosePreview }: { preview: ArtifactPr
     <button type="button" className="back-link" onClick={onClosePreview}>← Wróć do aktualnego etapu</button>
     <h2>{artifact.title}</h2>
     <p className="preview-status"><span className="status">{ARTIFACT_STATUS_LABELS[artifact.status]}</span></p>
-    <div className="artifact-version-content"><pre>{version?.contentText ?? (version?.contentJson ? JSON.stringify(version.contentJson, null, 2) : 'Brak treści')}</pre></div>
-    {version && <ArtifactExportActions artifact={artifact} version={version} />}
+    <div className="artifact-version-content">
+      {version && <ArtifactExportActions artifact={artifact} version={version} />}
+      <pre>{version?.contentText ?? (version?.contentJson ? JSON.stringify(version.contentJson, null, 2) : 'Brak treści')}</pre>
+    </div>
     <p className="notice-inline">To jest wyłącznie podgląd — bez możliwości edycji ani decyzji.</p>
   </section>
 }
@@ -186,8 +197,10 @@ export function AnalysisDetail({
 
     {detail.artifact && <div className="panel-section">
       <h3>Aktualny wynik{currentStage ? ` — ${STAGE_LABELS[currentStage]}` : ''}</h3>
-      <div className="artifact-version-content"><pre>{currentVersion?.contentText ?? 'Brak treści'}</pre></div>
-      {currentVersion && <ArtifactExportActions artifact={detail.artifact} version={currentVersion} />}
+      <div className="artifact-version-content">
+        {currentVersion && <ArtifactExportActions artifact={detail.artifact} version={currentVersion} />}
+        <pre>{currentVersion?.contentText ?? 'Brak treści'}</pre>
+      </div>
 
       <div className="artifact-actions">
         {detail.artifact.status === 'READY_FOR_REVIEW' && <>
