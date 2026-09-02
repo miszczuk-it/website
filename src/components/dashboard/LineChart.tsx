@@ -1,3 +1,5 @@
+import { formatHour } from '../../lib/format'
+
 interface LineChartPoint {
   x: Date
   y: number | null
@@ -147,7 +149,7 @@ export function LineChart({ title, unit, points, color = '#38bdf8', formatValue,
               {points.map((point, index) => (
                 <tr key={point.x.toISOString()}>
                   <td className="py-0.5 pr-4">
-                    {point.x.toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {formatHour(point.x)}
                   </td>
                   <td className="py-0.5 pr-4">
                     {point.y === null ? '—' : `${format(point.y)}${unit}`}
