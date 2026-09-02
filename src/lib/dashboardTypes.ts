@@ -69,7 +69,13 @@ export interface DashboardDeviceStatus {
   device_id: string
   online: boolean
   last_telemetry_received_at: string | null
+  last_seen_at?: string | null
 }
+
+export type TrafficRange = '24h' | '7d' | '30d'
+export interface DashboardTrafficBucket { bucket_start: string; incoming_vehicles: number; outgoing_vehicles: number; avg_speed_kmh: number | null; max_speed_kmh: number | null }
+export interface DashboardTrafficRecentPass { detected_at: string; direction: 'INCOMING' | 'OUTGOING'; speed_avg_kmh: number; speed_max_kmh: number; event_duration_ms: number }
+export interface DashboardTrafficOverview { device_id: string; range: TrafficRange; from: string; to: string; total_vehicles: number; incoming_vehicles: number; outgoing_vehicles: number; avg_speed_kmh: number | null; max_speed_kmh: number | null; buckets: DashboardTrafficBucket[]; recent_passes: DashboardTrafficRecentPass[] }
 
 // Shared 24h/7d range selector for the history charts (weather + ESP activity) on
 // RoadMonitorPage -- kept as one type so both sections stay in sync with a single control.

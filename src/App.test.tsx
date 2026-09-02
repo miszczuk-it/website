@@ -82,7 +82,7 @@ describe('public routes', () => {
 
     expect(screen.getByRole('heading', { name: 'IoT Road Monitor' })).toBeInTheDocument()
     await waitFor(() => expect(dashboardApi.getCurrentStatus).toHaveBeenCalledOnce())
-    expect(dashboardApi.getDeviceStatus).toHaveBeenCalledOnce()
+    expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(dashboardApi.getDeviceActivityHourly).toHaveBeenCalledOnce())
   })
 
