@@ -7,6 +7,7 @@ import type {
   DashboardCurrentStatus,
   DashboardDeviceActivityHourly,
   DashboardDeviceStatus,
+  DashboardTrafficOverview,
   DashboardWeatherHistory,
 } from '../lib/dashboardTypes'
 
@@ -55,6 +56,11 @@ const activity: DashboardDeviceActivityHourly = {
   points: [],
 }
 
+const traffic: DashboardTrafficOverview = {
+  device_id: 'esp32-radar-dev-001', range: '24h', from: '2026-08-22T11:00:00Z', to: '2026-08-23T11:00:00Z',
+  total_vehicles: 0, incoming_vehicles: 0, outgoing_vehicles: 0, avg_speed_kmh: null, max_speed_kmh: null, buckets: [], recent_passes: [],
+}
+
 describe('RoadMonitorPage manual refresh', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -62,6 +68,7 @@ describe('RoadMonitorPage manual refresh', () => {
     vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
     vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
     vi.mocked(dashboardApi.getDeviceActivityHourly).mockResolvedValue(activity)
+    vi.mocked(dashboardApi.getTrafficOverview).mockResolvedValue(traffic)
   })
 
   it('calls getCurrentStatus with refresh=true when the Refresh button is clicked', async () => {
@@ -89,7 +96,7 @@ describe('RoadMonitorPage manual refresh', () => {
   it('polls getDeviceStatus independently of getCurrentStatus and shows the ONLINE badge', async () => {
     render(<RoadMonitorPage />)
 
-    await waitFor(() => expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(2))
     expect(await screen.findByText('ESP ONLINE')).toBeInTheDocument()
   })
 })
@@ -101,6 +108,7 @@ describe('RoadMonitorPage shared 24h/7d history range', () => {
     vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
     vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
     vi.mocked(dashboardApi.getDeviceActivityHourly).mockResolvedValue(activity)
+    vi.mocked(dashboardApi.getTrafficOverview).mockResolvedValue(traffic)
   })
 
   it('starts both the weather history and ESP activity charts on the 24h range', async () => {
@@ -147,6 +155,7 @@ describe('RoadMonitorPage architecture section', () => {
     vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
     vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
     vi.mocked(dashboardApi.getDeviceActivityHourly).mockResolvedValue(activity)
+    vi.mocked(dashboardApi.getTrafficOverview).mockResolvedValue(traffic)
   })
 
   it('renders the architecture image with a descriptive alt and no ASCII diagram', async () => {
