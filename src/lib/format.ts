@@ -10,3 +10,28 @@ export function formatDateTime(iso: string): string {
     minute: '2-digit',
   })
 }
+
+// Short form (no year) shared by chart axis labels and table rows -- BarChart.tsx and
+// LineChart.tsx both plot Date objects derived from API UTC timestamps.
+export function formatHour(date: Date): string {
+  return date.toLocaleString('pl-PL', {
+    timeZone: 'Europe/Warsaw',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+// Speed values without a unit suffix -- for callers (e.g. chart tooltips) that already append
+// their own unit string. Backend averages carry full float precision; rounding is a display-only
+// concern (see hotfix report).
+export function formatSpeedValue(value: number | null | undefined): string {
+  return value == null ? '—' : value.toFixed(1)
+}
+
+// Speed values with the "km/h" unit baked in, for KPI tiles and inline text.
+export function formatSpeed(value: number | null | undefined): string {
+  const formatted = formatSpeedValue(value)
+  return formatted === '—' ? formatted : `${formatted} km/h`
+}

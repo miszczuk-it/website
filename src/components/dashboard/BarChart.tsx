@@ -1,3 +1,5 @@
+import { formatHour } from '../../lib/format'
+
 interface BarChartPoint {
   x: Date
   y: number
@@ -18,10 +20,6 @@ const CHART_HEIGHT = 160
 const PADDING_X = 8
 const PADDING_Y = 16
 const BAR_GAP_RATIO = 0.3
-
-function formatHour(date: Date): string {
-  return date.toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-}
 
 // Own-SVG bar chart, matching LineChart.tsx's visual language and accessibility pattern (an
 // aria-label summary plus a details/table fallback) instead of pulling in a charting library.
