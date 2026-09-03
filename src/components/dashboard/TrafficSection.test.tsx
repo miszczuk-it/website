@@ -20,4 +20,40 @@ describe('TrafficSection', () => {
   it('formats the speed chart tooltip/summary via the shared speed helper', async () => { render(<TrafficSection />); const chart = await screen.findByRole('img', { name: /Prędkość w czasie/ }); expect(chart.getAttribute('aria-label')).toMatch(/30\.0 km\/h/) })
   it('formats chart bucket timestamps in Europe/Warsaw local time, not raw UTC', async () => { render(<TrafficSection />); const chart = await screen.findByRole('img', { name: /Pojazdy w czasie/ }); expect(chart.getAttribute('aria-label')).toMatch(/01\.01, 02:00/) })
   it.each([['Ruch 7 dni', '7d'], ['Ruch 30 dni', '30d'], ['Ruch 24 h', '24h']] as const)('all traffic widgets refetch with %s', async (label, range) => { const user = userEvent.setup(); render(<TrafficSection />); await screen.findByText('Pojazdy'); await user.click(screen.getByRole('button', { name: label })); await waitFor(() => expect(api.getTrafficOverview).toHaveBeenLastCalledWith('esp32-radar-dev-001', range)) })
+
+  // RADAR-WIFI-001
+  it('shows Wi-Fi RSSI in dBm next to ONLINE status', async () => {
+    vi.mocked(api.getDeviceStatus).mockResolvedValue({ device_id: 'esp32-radar-dev-001', online: true, last_telemetry_received_at: null, last_seen_at: '2026-01-01T01:00:00Z', wifi_rssi: -67 })
+    render(<TrafficSection />)
+    expect(await screen.findByText(/ESP Radar ONLINE/)).toBeInTheDocument()
+    expect(screen.getByText(/Wi-Fi -67 dBm/)).toBeInTheDocument()
+  })
+
+  it('shows "Wi-Fi —" when ONLINE but wifi_rssi is null', async () => {
+    vi.mocked(api.getDeviceStatus).mockResolvedValue({ device_id: 'esp32-radar-dev-001', online: true, last_telemetry_received_at: null, last_seen_at: '2026-01-01T01:00:00Z', wifi_rssi: null })
+    render(<TrafficSection />)
+    expect(await screen.findByText(/ESP Radar ONLINE/)).toBeInTheDocument()
+    expect(screen.getByText(/Wi-Fi —/)).toBeInTheDocument()
+  })
+
+  it('does not present a stale wifi_rssi as current when OFFLINE', async () => {
+    vi.mocked(api.getDeviceStatus).mockResolvedValue({ device_id: 'esp32-radar-dev-001', online: false, last_telemetry_received_at: null, last_seen_at: '2026-01-01T01:00:00Z', wifi_rssi: -67 })
+    render(<TrafficSection />)
+    expect(await screen.findByText('● ESP Radar OFFLINE')).toBeInTheDocument()
+    expect(screen.queryByText(/dBm/)).not.toBeInTheDocument()
+  })
+
+  it('does not crash when the backend response omits wifi_rssi entirely (legacy backend)', async () => {
+    vi.mocked(api.getDeviceStatus).mockResolvedValue({ device_id: 'esp32-radar-dev-001', online: true, last_telemetry_received_at: null, last_seen_at: '2026-01-01T01:00:00Z' })
+    render(<TrafficSection />)
+    expect(await screen.findByText(/ESP Radar ONLINE/)).toBeInTheDocument()
+    expect(screen.getByText(/Wi-Fi —/)).toBeInTheDocument()
+  })
+
+  it('reads wifi_rssi from the existing device-status response without an extra API call', async () => {
+    vi.mocked(api.getDeviceStatus).mockResolvedValue({ device_id: 'esp32-radar-dev-001', online: true, last_telemetry_received_at: null, last_seen_at: '2026-01-01T01:00:00Z', wifi_rssi: -67 })
+    render(<TrafficSection />)
+    await screen.findByText(/Wi-Fi -67 dBm/)
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1)
+  })
 })

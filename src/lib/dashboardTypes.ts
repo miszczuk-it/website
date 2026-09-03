@@ -70,6 +70,10 @@ export interface DashboardDeviceStatus {
   online: boolean
   last_telemetry_received_at: string | null
   last_seen_at?: string | null
+  // RADAR-WIFI-001: latest known Wi-Fi RSSI (dBm) from the device heartbeat. Optional for
+  // backward compatibility with a backend predating this field's rollout; present but null
+  // when the backend has never received a heartbeat carrying wifi_rssi for this device.
+  wifi_rssi?: number | null
 }
 
 export type TrafficRange = '24h' | '7d' | '30d'
