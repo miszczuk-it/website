@@ -3,42 +3,44 @@ import { getDeviceStatus, getTrafficOverview } from '../../lib/dashboardApi'
 import type { DashboardDeviceStatus, DashboardTrafficOverview, TrafficRange } from '../../lib/dashboardTypes'
 import { formatDateTime, formatSpeed, formatSpeedValue } from '../../lib/format'
 import { BarChart } from './BarChart'
+import { DeviceStatusBadge } from './DeviceStatusBadge'
 import { LineChart } from './LineChart'
 
 const radarDeviceId = 'esp32-radar-dev-001'
 const ranges: { value: TrafficRange; label: string }[] = [{ value: '24h', label: 'Ruch 24 h' }, { value: '7d', label: 'Ruch 7 dni' }, { value: '30d', label: 'Ruch 30 dni' }]
 
-// RADAR-WIFI-001: dBm is shown as-is, never converted to a percentage (an arbitrary mapping for
-// a logarithmic unit). Only ONLINE presents wifi_rssi as current -- a stale value surviving from
-// before the device went offline must not be shown as live signal strength.
-function radarStatusText(radar: DashboardDeviceStatus | null): string {
-  if (!radar?.online) return 'ESP Radar OFFLINE'
-  return `ESP Radar ONLINE · Wi-Fi ${radar.wifi_rssi != null ? `${radar.wifi_rssi} dBm` : '—'}`
-}
-
-function radarStatusAriaLabel(radar: DashboardDeviceStatus | null): string {
-  if (!radar?.online) return 'ESP Radar offline'
-  const rssi = radar.wifi_rssi
-  const rssiPhrase = rssi == null ? 'nieznana' : rssi < 0 ? `minus ${Math.abs(rssi)} dBm` : `${rssi} dBm`
-  return `ESP Radar online, siła Wi-Fi ${rssiPhrase}`
-}
-
+// Inline radar status here mirrors CurrentConditionsCard's own inline weather-station status --
+// both use the shared DeviceStatusBadge (ONLINE/OFFLINE + Wi-Fi RSSI + last contact). The
+// consolidated DeviceStatusSection (RoadMonitorPage) additionally shows both devices side by
+// side; this inline badge is not redundant with it, it's the same parity the weather station has.
 export function TrafficSection() {
   const [range, setRange] = useState<TrafficRange>('24h')
   const [data, setData] = useState<DashboardTrafficOverview | null>(null)
   const [radar, setRadar] = useState<DashboardDeviceStatus | null>(null)
   const [error, setError] = useState(false)
+  const [statusError, setStatusError] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([getTrafficOverview(radarDeviceId, range), getDeviceStatus(radarDeviceId)])
-      .then(([traffic, status]) => { if (!cancelled) { setData(traffic); setRadar(status); setError(false) } })
+    getTrafficOverview(radarDeviceId, range)
+      .then((traffic) => { if (!cancelled) { setData(traffic); setError(false) } })
       .catch(() => { if (!cancelled) setError(true) })
     return () => { cancelled = true }
   }, [range])
 
+  useEffect(() => {
+    let cancelled = false
+    getDeviceStatus(radarDeviceId)
+      .then((status) => { if (!cancelled) { setRadar(status); setStatusError(false) } })
+      .catch(() => { if (!cancelled) setStatusError(true) })
+    return () => { cancelled = true }
+  }, [])
+
   return <section aria-labelledby="traffic-heading" className="mt-16 rounded-xl border border-slate-800 bg-slate-900/40 p-6">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="traffic-heading" className="text-2xl font-bold tracking-tight text-white">Ruch drogowy</h2><span className={radar?.online ? 'text-emerald-300' : 'text-rose-300'} aria-label={radarStatusAriaLabel(radar)}>● {radarStatusText(radar)}</span></div>
+    <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 id="traffic-heading" className="text-2xl font-bold tracking-tight text-white">Ruch drogowy</h2>
+      <DeviceStatusBadge status={radar} error={statusError} />
+    </div>
     <div className="mt-4 flex gap-2" aria-label="Zakres ruchu">{ranges.map(({ value, label }) => <button key={value} type="button" aria-pressed={range === value} onClick={() => setRange(value)} className="rounded border border-slate-700 px-3 py-1">{label}</button>)}</div>
     {error && <p role="alert" className="mt-4 text-rose-300">Statystyka ruchu jest chwilowo niedostępna.</p>}
     {!data && !error && <p className="mt-4 text-slate-400">Ładowanie danych ruchu…</p>}

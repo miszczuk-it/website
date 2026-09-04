@@ -35,3 +35,21 @@ export function formatSpeed(value: number | null | undefined): string {
   const formatted = formatSpeedValue(value)
   return formatted === '—' ? formatted : `${formatted} km/h`
 }
+
+// Shared by CurrentConditionsCard (LOCAL primary metrics) and LocalWeatherComparison (LOCAL vs
+// WeatherAPI table) so both surfaces format the same underlying fields identically.
+export function formatTemperature(value: number | null): string {
+  return value == null ? '—' : `${value.toFixed(1)} °C`
+}
+
+export function formatHumidity(value: number | null): string {
+  return value == null ? '—' : `${Math.round(value)} %`
+}
+
+export function formatPressure(value: number | null): string {
+  return value == null ? '—' : `${value.toFixed(0)} hPa`
+}
+
+export function formatLux(value: number | null): string {
+  return value == null ? '—' : `${new Intl.NumberFormat('pl-PL').format(Math.round(value))} lux`
+}

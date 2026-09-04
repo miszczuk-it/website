@@ -45,6 +45,7 @@ export function LineChart({ title, unit, points, color = '#38bdf8', formatValue,
   const format = formatValue ?? ((value: number) => value.toFixed(1))
 
   const secondaryColor = secondary?.color ?? '#34d399'
+  const hasPrimaryData = points.some((point) => point.y !== null)
   const hasSecondaryData = secondary !== undefined && secondary.points.some((point) => point.y !== null)
   const series: LineChartSeries[] = [{ label: primaryLabel ?? title, points, color }]
   if (hasSecondaryData && secondary) series.push({ label: secondary.label, points: secondary.points, color: secondaryColor })
@@ -76,7 +77,7 @@ export function LineChart({ title, unit, points, color = '#38bdf8', formatValue,
       <figcaption className="flex items-baseline justify-between text-sm font-semibold text-slate-200">
         <span>{title}</span>
         {last.y !== null && (
-          <span className="font-normal text-slate-400">
+          <span className="font-normal" style={{ color }}>
             {format(last.y)}
             {unit}
           </span>
@@ -108,7 +109,12 @@ export function LineChart({ title, unit, points, color = '#38bdf8', formatValue,
         ))}
       </svg>
 
-      {secondary && !hasSecondaryData && <p className="mt-2 text-xs text-slate-500">Brak danych lokalnych w tym okresie.</p>}
+      {!hasPrimaryData && (
+        <p className="mt-2 text-xs text-slate-500">{primaryLabel ?? title} — brak danych w tym okresie.</p>
+      )}
+      {secondary && !hasSecondaryData && (
+        <p className="mt-2 text-xs text-slate-500">{secondary.label} — brak danych w tym okresie.</p>
+      )}
 
       <div className="mt-2 flex justify-between text-xs text-slate-500">
         <span>

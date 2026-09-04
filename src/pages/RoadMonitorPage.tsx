@@ -4,6 +4,7 @@ import { useDocumentMeta } from '../lib/useDocumentMeta'
 import { getCurrentStatus, getDeviceStatus } from '../lib/dashboardApi'
 import type { DashboardCurrentStatus, DashboardDeviceStatus, HistoryRangeHours } from '../lib/dashboardTypes'
 import { CurrentConditionsCard } from '../components/dashboard/CurrentConditionsCard'
+import { DeviceStatusSection } from '../components/dashboard/DeviceStatusSection'
 import { WeatherHistorySection } from '../components/dashboard/WeatherHistorySection'
 import { DeviceActivitySection } from '../components/dashboard/DeviceActivitySection'
 import { TrafficSection } from '../components/dashboard/TrafficSection'
@@ -224,6 +225,8 @@ export function RoadMonitorPage() {
             />
           </div>
         </section>
+
+        <DeviceStatusSection />
 
         <WeatherHistorySection
           hours={historyHours}
