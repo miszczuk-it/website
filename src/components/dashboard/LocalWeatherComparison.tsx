@@ -1,13 +1,9 @@
 import type { DashboardLocalComparison, DashboardWeatherSnapshot } from '../../lib/dashboardTypes'
-import { formatDateTime } from '../../lib/format'
+import { formatDateTime, formatHumidity, formatLux, formatPressure, formatTemperature } from '../../lib/format'
 
 interface LocalWeatherComparisonProps {
   comparison: DashboardLocalComparison
   weather: DashboardWeatherSnapshot
-}
-
-function formatTemperature(value: number | null): string {
-  return value == null ? '—' : `${value.toFixed(1)} °C`
 }
 
 function formatTemperatureDelta(value: number | null): string {
@@ -15,21 +11,9 @@ function formatTemperatureDelta(value: number | null): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}°C`
 }
 
-function formatHumidity(value: number | null): string {
-  return value == null ? '—' : `${Math.round(value)} %`
-}
-
 function formatHumidityDelta(value: number | null): string {
   if (value == null) return '—'
   return `${value > 0 ? '+' : ''}${Math.round(value)} pp`
-}
-
-function formatPressure(value: number | null): string {
-  return value == null ? '—' : `${value.toFixed(0)} hPa`
-}
-
-function formatLux(value: number | null): string {
-  return value == null ? '—' : `${new Intl.NumberFormat('pl-PL').format(Math.round(value))} lux`
 }
 
 function formatCloud(value: number | null): string {

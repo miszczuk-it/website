@@ -143,29 +143,29 @@ export function WeatherHistorySection({
             <LineChart
               title="Temperatura"
               unit=" °C"
-              points={temperaturePoints}
+              points={localTemperaturePoints}
               color="#f97316"
-              primaryLabel="WeatherAPI"
-              secondary={{ label: 'Lokalnie', points: localTemperaturePoints }}
+              primaryLabel="Lokalnie"
+              secondary={{ label: 'WeatherAPI', points: temperaturePoints, color: '#34d399' }}
               deltaPoints={temperatureDeltaPoints}
             />
             <LineChart
               title="Ciśnienie"
               unit=" hPa"
-              points={pressurePoints}
+              points={localPressurePoints}
               color="#38bdf8"
               formatValue={(v) => v.toFixed(0)}
-              primaryLabel="WeatherAPI"
-              secondary={{ label: 'Lokalnie', points: localPressurePoints }}
+              primaryLabel="Lokalnie"
+              secondary={{ label: 'WeatherAPI', points: pressurePoints, color: '#34d399' }}
             />
             <LineChart
               title="Wilgotność"
               unit=" %"
-              points={humidityPoints}
+              points={localHumidityPoints}
               color="#a78bfa"
               formatValue={(v) => v.toFixed(0)}
-              primaryLabel="WeatherAPI"
-              secondary={{ label: 'Lokalnie', points: localHumidityPoints }}
+              primaryLabel="Lokalnie"
+              secondary={{ label: 'WeatherAPI', points: humidityPoints, color: '#34d399' }}
               deltaPoints={humidityDeltaPoints}
               deltaUnit=" pp"
             />

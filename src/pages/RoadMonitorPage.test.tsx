@@ -47,6 +47,7 @@ const deviceStatus: DashboardDeviceStatus = {
   device_id: 'road-001',
   online: true,
   last_telemetry_received_at: '2026-08-23T11:04:00Z',
+  last_seen_at: '2026-08-23T11:04:00Z',
 }
 
 const activity: DashboardDeviceActivityHourly = {
@@ -89,15 +90,19 @@ describe('RoadMonitorPage manual refresh', () => {
     render(<RoadMonitorPage />)
 
     await waitFor(() => expect(dashboardApi.getCurrentStatus).toHaveBeenCalledTimes(1))
-    expect(await screen.findByText(/Ostatnia aktualizacja:/)).toBeInTheDocument()
+    expect(await screen.findByText(/Pomiar lokalny:/)).toBeInTheDocument()
+    expect(await screen.findByText(/WeatherAPI:/)).toBeInTheDocument()
     expect(screen.queryByText(/temu/)).not.toBeInTheDocument()
   })
 
   it('polls getDeviceStatus independently of getCurrentStatus and shows the ONLINE badge', async () => {
     render(<RoadMonitorPage />)
 
-    await waitFor(() => expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(2))
-    expect(await screen.findByText('ESP ONLINE')).toBeInTheDocument()
+    // One call from RoadMonitorPage's own device-status poll (road-001, feeds CurrentConditionsCard's
+    // badge), two from DeviceStatusSection's independent per-device polling (road-001 + radar),
+    // and one from TrafficSection's own inline radar badge.
+    await waitFor(() => expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(4))
+    expect(await screen.findAllByText('ESP ONLINE')).not.toHaveLength(0)
   })
 })
 

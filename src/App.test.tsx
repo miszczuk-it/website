@@ -6,6 +6,7 @@ import type {
   DashboardCurrentStatus,
   DashboardDeviceActivityHourly,
   DashboardDeviceStatus,
+  DashboardTrafficOverview,
   DashboardWeatherHistory,
 } from './lib/dashboardTypes'
 
@@ -45,6 +46,7 @@ const deviceStatus: DashboardDeviceStatus = {
   device_id: 'road-001',
   online: true,
   last_telemetry_received_at: '2026-08-23T11:04:00Z',
+  last_seen_at: '2026-08-23T11:04:00Z',
 }
 
 const activity: DashboardDeviceActivityHourly = {
@@ -54,6 +56,11 @@ const activity: DashboardDeviceActivityHourly = {
   points: [],
 }
 
+const traffic: DashboardTrafficOverview = {
+  device_id: 'esp32-radar-dev-001', range: '24h', from: '2026-08-22T11:00:00Z', to: '2026-08-23T11:00:00Z',
+  total_vehicles: 0, incoming_vehicles: 0, outgoing_vehicles: 0, avg_speed_kmh: null, max_speed_kmh: null, buckets: [], recent_passes: [],
+}
+
 describe('public routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -61,6 +68,7 @@ describe('public routes', () => {
     vi.mocked(dashboardApi.getWeatherHistory).mockResolvedValue(history)
     vi.mocked(dashboardApi.getDeviceStatus).mockResolvedValue(deviceStatus)
     vi.mocked(dashboardApi.getDeviceActivityHourly).mockResolvedValue(activity)
+    vi.mocked(dashboardApi.getTrafficOverview).mockResolvedValue(traffic)
   })
 
   it('renders the personal portfolio at / with a Road Monitor link and no dashboard requests', () => {
@@ -82,7 +90,10 @@ describe('public routes', () => {
 
     expect(screen.getByRole('heading', { name: 'IoT Road Monitor' })).toBeInTheDocument()
     await waitFor(() => expect(dashboardApi.getCurrentStatus).toHaveBeenCalledOnce())
-    expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(2)
+    // One call from RoadMonitorPage's own device-status poll (road-001, feeds CurrentConditionsCard's
+    // badge), two from DeviceStatusSection's independent per-device polling (road-001 + radar),
+    // and one from TrafficSection's own inline radar badge.
+    await waitFor(() => expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(4))
     await waitFor(() => expect(dashboardApi.getDeviceActivityHourly).toHaveBeenCalledOnce())
   })
 

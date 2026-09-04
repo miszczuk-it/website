@@ -70,7 +70,7 @@ describe('WeatherHistorySection', () => {
     expect(within(temperatureFigure).getByText('+4.3 °C')).toBeInTheDocument()
   })
 
-  it('shows "Brak danych lokalnych" and no delta column for pressure when local pressure is null throughout', async () => {
+  it('shows a "no local data" message and no delta column for pressure when local pressure is null throughout, while still plotting WeatherAPI as reference', async () => {
     const history: DashboardWeatherHistory = {
       location_id: 'road-001',
       from: '2026-08-22T14:00:00Z',
@@ -83,12 +83,16 @@ describe('WeatherHistorySection', () => {
     await renderSection(history)
 
     const pressureFigure = (await screen.findByText('Ciśnienie')).closest('figure')!
-    expect(within(pressureFigure).getByText(/Brak danych lokalnych w tym okresie/)).toBeInTheDocument()
+    // Pressure is LOCAL-primary/WeatherAPI-secondary (ETAP 7): with no LOCAL data for the period,
+    // the primary series is empty but WeatherAPI still plots as reference, so both legend labels
+    // appear and the "no data" message names the empty (primary/Lokalnie) series specifically.
+    expect(within(pressureFigure).getByText(/Lokalnie — brak danych w tym okresie/)).toBeInTheDocument()
+    expect(within(pressureFigure).getAllByText('Lokalnie').length).toBeGreaterThan(0)
+    expect(within(pressureFigure).getAllByText('WeatherAPI').length).toBeGreaterThan(0)
 
     const user = userEvent.setup()
     await user.click(within(pressureFigure).getByText('Dane w formie tabeli'))
     expect(within(pressureFigure).queryByText('Różnica')).not.toBeInTheDocument()
-    expect(within(pressureFigure).queryByText('Lokalnie')).not.toBeInTheDocument()
   })
 
   it('renders a LOCAL-only light chart with no legend and no delta column', async () => {
