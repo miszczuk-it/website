@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { getDeviceStatus, getTrafficOverview } from '../../lib/dashboardApi'
 import type { DashboardDeviceStatus, DashboardTrafficOverview, TrafficRange } from '../../lib/dashboardTypes'
 import { formatDateTime, formatSpeed, formatSpeedValue } from '../../lib/format'
+import { RADAR_DEVICE_ID } from '../../lib/monitoredDevices'
 import { BarChart } from './BarChart'
 import { DeviceStatusBadge } from './DeviceStatusBadge'
 import { LineChart } from './LineChart'
 
-const radarDeviceId = 'esp32-radar-dev-001'
+const radarDeviceId = RADAR_DEVICE_ID
 const ranges: { value: TrafficRange; label: string }[] = [{ value: '24h', label: 'Ruch 24 h' }, { value: '7d', label: 'Ruch 7 dni' }, { value: '30d', label: 'Ruch 30 dni' }]
 
 // Inline radar status here mirrors CurrentConditionsCard's own inline weather-station status --
