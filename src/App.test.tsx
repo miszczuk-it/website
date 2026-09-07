@@ -57,7 +57,7 @@ const activity: DashboardDeviceActivityHourly = {
 }
 
 const traffic: DashboardTrafficOverview = {
-  device_id: 'esp32-radar-dev-001', range: '24h', from: '2026-08-22T11:00:00Z', to: '2026-08-23T11:00:00Z',
+  device_id: 'road-radar-001', range: '24h', from: '2026-08-22T11:00:00Z', to: '2026-08-23T11:00:00Z',
   total_vehicles: 0, incoming_vehicles: 0, outgoing_vehicles: 0, avg_speed_kmh: null, max_speed_kmh: null, buckets: [], recent_passes: [],
 }
 
@@ -91,9 +91,9 @@ describe('public routes', () => {
     expect(screen.getByRole('heading', { name: 'IoT Road Monitor' })).toBeInTheDocument()
     await waitFor(() => expect(dashboardApi.getCurrentStatus).toHaveBeenCalledOnce())
     // One call from RoadMonitorPage's own device-status poll (road-001, feeds CurrentConditionsCard's
-    // badge), two from DeviceStatusSection's independent per-device polling (road-001 + radar),
-    // and one from TrafficSection's own inline radar badge.
-    await waitFor(() => expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(4))
+    // badge), three from DeviceStatusSection's independent per-device polling (weather + radar +
+    // camera), and one from TrafficSection's own inline radar badge.
+    await waitFor(() => expect(dashboardApi.getDeviceStatus).toHaveBeenCalledTimes(5))
     await waitFor(() => expect(dashboardApi.getDeviceActivityHourly).toHaveBeenCalledOnce())
   })
 

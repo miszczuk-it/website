@@ -28,7 +28,7 @@ describe('DeviceStatusBadge', () => {
   })
 
   it('shows the last-contact timestamp for a radar-like device even when last_telemetry_received_at is null (heartbeat only, no telemetry_raw row)', () => {
-    const status: DashboardDeviceStatus = { device_id: 'esp32-radar-dev-001', online: true, last_telemetry_received_at: null, last_seen_at: '2026-08-23T22:05:00Z' }
+    const status: DashboardDeviceStatus = { device_id: 'road-radar-001', online: true, last_telemetry_received_at: null, last_seen_at: '2026-08-23T22:05:00Z' }
     render(<DeviceStatusBadge status={status} error={false} />)
 
     expect(screen.getByText('ESP ONLINE')).toBeInTheDocument()
